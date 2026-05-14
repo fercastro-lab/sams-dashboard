@@ -357,6 +357,10 @@ function renderOwnerCards(){
     const total=oh.length, yes=oh.filter(h=>h['Active Contact']==='Yes').length, no=total-yes;
     const rate=total>0?(yes/total*100).toFixed(1):'0.0';
     const ini=(owner&&typeof owner==='string'?owner:'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    // GMV acumulado — solo holdings con active contact YES
+    const gmvTotal=oh.reduce((sum,h)=>{const v=parseFloat(h['GMV Last Month'])||0;return sum+v;},0);
+    const gmvActive=oh.filter(h=>h['Active Contact']==='Yes').reduce((sum,h)=>{const v=parseFloat(h['GMV Last Month'])||0;return sum+v;},0);
+    const gmvFmt=n=>'$'+Math.round(n).toLocaleString('es-MX');
     return `<div class="owner-card">
       <div class="owner-head">
         <div class="owner-avatar">${ini}</div>
@@ -367,6 +371,10 @@ function renderOwnerCards(){
         <div class="ostat"><div class="ostat-val" style="color:var(--green-d)">${yes}</div><div class="ostat-lbl">Yes</div></div>
         <div class="ostat"><div class="ostat-val" style="color:var(--red-d)">${no}</div><div class="ostat-lbl">No</div></div>
         <div class="ostat"><div class="ostat-val" style="color:var(--teal)">${rate}%</div><div class="ostat-lbl">Rate</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+        <div class="ostat"><div class="ostat-val" style="color:var(--text1);font-size:13px">${gmvFmt(gmvTotal)}</div><div class="ostat-lbl">GMV Total</div></div>
+        <div class="ostat"><div class="ostat-val" style="color:var(--green-d);font-size:13px">${gmvFmt(gmvActive)}</div><div class="ostat-lbl">GMV Contactado</div></div>
       </div>
       <div class="prog-track"><div class="prog-fill" style="width:${rate}%"></div></div>
       <div class="prog-lbl"><span>${yes} con contacto activo</span><span>${no} sin contacto</span></div>
@@ -481,6 +489,10 @@ function toast(msg,isErr){
 }
 
 loadData();
+// Auto-actualiza cada 30 minutos
+setInterval(function(){
+  loadData();
+}, 30 * 60 * 1000);
 </script>
 </body>
 </html>
