@@ -345,7 +345,7 @@ function renderOwnerCards(){
     const oh=filtered.filter(h=>h['Owner']===owner);
     const total=oh.length, yes=oh.filter(h=>h['Active Contact']==='Yes').length, no=total-yes;
     const rate=total>0?(yes/total*100).toFixed(1):'0.0';
-    const ini=owner.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const ini=(owner&&typeof owner==='string'?owner:'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
     return `<div class="owner-card">
       <div class="owner-head">
         <div class="owner-avatar">${ini}</div>
@@ -375,7 +375,7 @@ function renderTable(){
     const ac=h['Active Contact'];
     const badge=ac==='Yes'?`<span class="badge-yes"><i class="bi bi-check-circle-fill" style="font-size:9px"></i> Yes</span>`:`<span class="badge-no"><i class="bi bi-x-circle-fill" style="font-size:9px"></i> No</span>`;
     const owner=h['Owner']||'Sin asignar';
-    const ini=owner.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const ini=(owner&&typeof owner==='string'?owner:'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
     const wa=fmtDate(h['Último WhatsApp']), email=fmtDate(h['Último Email Reply']), conf=fmtDate(h['Active Contact Last Confirmed']);
     const gmv=h['GMV Last Month']?'$'+Number(h['GMV Last Month']).toLocaleString('es-MX'):'<span class="empty-cell">—</span>';
     const mq=h['Merchant Quantity']||'<span class="empty-cell">—</span>';
@@ -436,7 +436,7 @@ function renderCalendar(){
   document.getElementById('cal-grid').innerHTML=fn.slice(0,80).map(name=>{
     const rows=snapshot.filter(r=>r['Nombre']===name);
     const owner=rows[0]?.['Owner']||'';
-    const ini=owner.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const ini=(owner&&typeof owner==='string'?owner:'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
     const days=rows.map((r,i)=>{
       const cls=r['Active Contact']==='Yes'?'yes':'no';
       return `<div class="ch-day ${cls}" data-tip="${r['Fecha']||'día '+(i+1)}">${i+1}</div>`;
