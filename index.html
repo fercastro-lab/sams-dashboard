@@ -259,8 +259,19 @@ function loadData() {
   // JSONP bypasea CORS completamente
   window.__jsonpCallback = function(json) {
     try {
-      raw=(json.holdings||[]).filter(h=>h["Holding ID"]);
-      snapshot=json.snapshot||[];
+      // Normaliza todos los valores a string para evitar errores de tipo
+      function normalizeRow(h) {
+        const out = {};
+        Object.keys(h).forEach(function(k) {
+          const v = h[k];
+          if (v === null || v === undefined) out[k] = '';
+          else if (typeof v === 'object' && v !== null) out[k] = String(v);
+          else out[k] = v;
+        });
+        return out;
+      }
+      raw=(json.holdings||[]).filter(h=>h["Holding ID"]).map(normalizeRow);
+      snapshot=(json.snapshot||[]).map(normalizeRow);
       buildFilters();
       applyFilters();
       renderCalendar();
