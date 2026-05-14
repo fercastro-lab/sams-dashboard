@@ -246,30 +246,42 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
 </div>
 
 <script>
-const API = "https://script.google.com/macros/s/AKfycbxvhnE-3fpiSVse0C7uw4mZLTNYe8TaCOp8hVkIwFeXWCJZOeV7z297GZ12_fx6UKBi/exec";
+const API = "https://script.google.com/macros/s/AKfycbyHnTn592ko-KIH0oAoLlNr0s0GgCa3dBDV-LCiZ39Uh7OGipmk1bRBJzQczWAdN2ZE/exec";
 const PER_PAGE = 25;
 let raw=[], filtered=[], snapshot=[], page=1, tabFilter='all', sortCol='', sortDir=1;
 
-async function loadData() {
+function loadData() {
   const btn=document.getElementById("btn-ref"), ic=document.getElementById("ref-icon");
   btn.disabled=true; ic.classList.add("spin");
-  try {
-    const res=await fetch(API, {method:"GET", redirect:"follow", mode:"cors"});
-    const text=await res.text();
-    const json=JSON.parse(text);
-    raw=(json.holdings||[]).filter(h=>h["Holding ID"]);
-    snapshot=json.snapshot||[];
-    buildFilters();
-    applyFilters();
-    renderCalendar();
-    const now=new Date();
-    document.getElementById("nav-update").textContent="Actualizado "+now.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
-    toast("Datos actualizados",false);
-  } catch(e) {
-    console.error("Error:", e);
-    toast("Error al cargar datos",true);
-    document.getElementById("tbl-container").innerHTML=`<div class="empty-box"><div class="empty-icon"><i class="bi bi-exclamation-triangle"></i></div><div class="empty-lbl">No se pudieron cargar los datos.<br><span style="font-size:11px;color:var(--text3)">${e.message}</span></div></div>`;
-  } finally { btn.disabled=false; ic.classList.remove("spin"); }
+  // Limpia callback anterior si existe
+  const old = document.getElementById("jsonp-script");
+  if (old) old.remove();
+  // JSONP bypasea CORS completamente
+  window.__jsonpCallback = function(json) {
+    try {
+      raw=(json.holdings||[]).filter(h=>h["Holding ID"]);
+      snapshot=json.snapshot||[];
+      buildFilters();
+      applyFilters();
+      renderCalendar();
+      const now=new Date();
+      document.getElementById("nav-update").textContent="Actualizado "+now.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
+      toast("Datos actualizados",false);
+    } catch(e) {
+      toast("Error procesando datos: "+e.message, true);
+    } finally {
+      btn.disabled=false; ic.classList.remove("spin");
+    }
+  };
+  const script = document.createElement("script");
+  script.id = "jsonp-script";
+  script.src = API + "?callback=__jsonpCallback";
+  script.onerror = function() {
+    toast("Error al cargar datos", true);
+    btn.disabled=false; ic.classList.remove("spin");
+    document.getElementById("tbl-container").innerHTML='<div class="empty-box"><div class="empty-icon"><i class="bi bi-exclamation-triangle"></i></div><div class="empty-lbl">No se pudieron cargar los datos.</div></div>';
+  };
+  document.head.appendChild(script);
 }
 
 function buildFilters() {
