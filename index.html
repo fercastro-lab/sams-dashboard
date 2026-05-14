@@ -251,23 +251,25 @@ const PER_PAGE = 25;
 let raw=[], filtered=[], snapshot=[], page=1, tabFilter='all', sortCol='', sortDir=1;
 
 async function loadData() {
-  const btn=document.getElementById('btn-ref'), ic=document.getElementById('ref-icon');
-  btn.disabled=true; ic.classList.add('spin');
+  const btn=document.getElementById("btn-ref"), ic=document.getElementById("ref-icon");
+  btn.disabled=true; ic.classList.add("spin");
   try {
-    const res=await fetch(API);
-    const json=await res.json();
-    raw=(json.holdings||[]).filter(h=>h['Holding ID']);
+    const res=await fetch(API, {method:"GET", redirect:"follow", mode:"cors"});
+    const text=await res.text();
+    const json=JSON.parse(text);
+    raw=(json.holdings||[]).filter(h=>h["Holding ID"]);
     snapshot=json.snapshot||[];
     buildFilters();
     applyFilters();
     renderCalendar();
     const now=new Date();
-    document.getElementById('nav-update').textContent='Actualizado '+now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-    toast('Datos actualizados',false);
+    document.getElementById("nav-update").textContent="Actualizado "+now.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
+    toast("Datos actualizados",false);
   } catch(e) {
-    toast('Error al cargar datos',true);
-    document.getElementById('tbl-container').innerHTML=`<div class="empty-box"><div class="empty-icon"><i class="bi bi-exclamation-triangle"></i></div><div class="empty-lbl">No se pudieron cargar los datos. Verifica que el script esté publicado.</div></div>`;
-  } finally { btn.disabled=false; ic.classList.remove('spin'); }
+    console.error("Error:", e);
+    toast("Error al cargar datos",true);
+    document.getElementById("tbl-container").innerHTML=`<div class="empty-box"><div class="empty-icon"><i class="bi bi-exclamation-triangle"></i></div><div class="empty-lbl">No se pudieron cargar los datos.<br><span style="font-size:11px;color:var(--text3)">${e.message}</span></div></div>`;
+  } finally { btn.disabled=false; ic.classList.remove("spin"); }
 }
 
 function buildFilters() {
