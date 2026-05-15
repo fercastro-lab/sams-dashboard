@@ -132,6 +132,46 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
 .toast.ok{background:var(--teal);color:#fff}
 .toast.err{background:var(--red-d);color:#fff}
 @media(max-width:900px){.stats{grid-template-columns:1fr 1fr}.owner-row{grid-template-columns:1fr}.main{padding:16px}.nav{padding:0 16px}}
+
+/* TABS NAV */
+.tabs-nav{background:var(--teal);border-bottom:1px solid rgba(255,255,255,.1);display:flex;padding:0 32px;gap:4px}
+.tab-nav-btn{height:44px;padding:0 20px;border:none;background:transparent;color:rgba(255,255,255,.5);font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;transition:all .15s;display:flex;align-items:center;gap:6px}
+.tab-nav-btn:hover{color:rgba(255,255,255,.8)}
+.tab-nav-btn.active{color:#fff;border-bottom-color:var(--cyan)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+/* PERFORMANCE */
+.perf-section{background:var(--card);border-radius:16px;border:1px solid var(--border);box-shadow:var(--sh-sm);overflow:hidden;margin-bottom:20px}
+.perf-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.perf-title{font-size:15px;font-weight:800;color:var(--text1)}
+.perf-sub{font-size:12px;color:var(--text3);margin-top:1px}
+.perf-table-wrap{overflow-x:auto}
+.perf-table{width:100%;border-collapse:collapse;font-size:12px}
+.perf-table th{padding:8px 12px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);background:var(--surface);border-bottom:1px solid var(--border);white-space:nowrap}
+.perf-table th:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1;min-width:180px}
+.perf-table td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2);white-space:nowrap}
+.perf-table td:first-child{text-align:left;font-weight:700;color:var(--text1);position:sticky;left:0;background:var(--card);z-index:1}
+.perf-table tr:last-child td{border-bottom:none}
+.perf-table tr:hover td{background:rgba(74,201,227,.04)}
+.perf-table tr:hover td:first-child{background:rgba(74,201,227,.06)}
+.metric-section-hdr{background:var(--teal);color:#fff}
+.metric-section-hdr td{color:#fff!important;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:6px 12px;background:var(--teal)!important}
+.metric-sub-row td:first-child{font-weight:500;color:var(--text2)!important;padding-left:20px;font-size:12px}
+.metric-sub-row td{font-size:12px}
+.pct-green{color:var(--green-d);font-weight:700}
+.pct-red{color:var(--red-d);font-weight:700}
+.pct-yellow{color:var(--yellow);font-weight:700}
+.badge-achieved{font-size:10px;font-weight:700;padding:2px 7px;border-radius:100px;display:inline-block}
+.merchants-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:20px}
+.merchant-card{border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--surface)}
+.merchant-card-title{font-size:13px;font-weight:800;color:var(--text1);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.merchant-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.mstat{text-align:center;background:var(--card);border-radius:8px;padding:8px}
+.mstat-val{font-size:18px;font-weight:800;letter-spacing:-0.5px}
+.mstat-lbl{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-top:2px}
+.merchant-list{max-height:200px;overflow-y:auto}
+.merchant-item{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
+.merchant-item:last-child{border-bottom:none}
 </style>
 </head>
 <body>
@@ -148,8 +188,14 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
   </div>
 </nav>
 
+<div class="tabs-nav">
+  <button class="tab-nav-btn active" onclick="switchTab('acr',this)"><i class="bi bi-activity"></i> Active Contact Rate</button>
+  <button class="tab-nav-btn" onclick="switchTab('performance',this)"><i class="bi bi-graph-up"></i> Master Performance</button>
+</div>
+
 <div class="toast" id="toast"></div>
 
+<div id="tab-acr" class="tab-content active">
 <div class="main">
   <div class="filters">
     <div class="filter-group">
@@ -247,6 +293,55 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
     <div class="cal-grid" id="cal-grid"></div>
   </div>
 </div>
+</div>
+
+<!-- PERFORMANCE TAB -->
+<div id="tab-performance" class="tab-content">
+<div class="main">
+
+  <!-- FILTER BAR PERFORMANCE -->
+  <div class="filters" style="margin-bottom:20px">
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-calendar3"></i> Mes</span>
+      <select class="fsel" id="perf-month" onchange="renderPerformance()">
+        <option value="all">Todos los meses</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-person"></i> Vista</span>
+      <select class="fsel" id="perf-view" onchange="renderPerformance()">
+        <option value="all">SAMs (Total)</option>
+        <option value="Alex Martinez">Alex Martinez</option>
+        <option value="Delia Tellez">Delia Tellez</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- PERFORMANCE TABLE -->
+  <div class="perf-section" id="perf-section">
+    <div class="perf-header">
+      <div>
+        <div class="perf-title" id="perf-title">SAMs — Performance 2026</div>
+        <div class="perf-sub" id="perf-sub">Datos actualizados diariamente desde BigQuery</div>
+      </div>
+    </div>
+    <div id="perf-container"><div class="loading-box"><div class="spinner"></div><div class="loading-lbl">Cargando performance...</div></div></div>
+  </div>
+
+  <!-- MERCHANTS ACTIVOS/CHURN -->
+  <div class="perf-section">
+    <div class="perf-header">
+      <div>
+        <div class="perf-title">Merchants — Mes anterior</div>
+        <div class="perf-sub">Activos vs Churn por account manager</div>
+      </div>
+    </div>
+    <div class="merchants-grid" id="merchants-grid"><div class="loading-box"><div class="spinner"></div></div></div>
+  </div>
+
+</div>
+</div>
 
 <script>
 const API = "https://script.google.com/macros/s/AKfycbw9mG--q5ThCaF9UpREQlqAsgwGdBuxM96l0HKQh5G5tct-MQa9K5Rs8YHObhvPj5xE/exec";
@@ -275,6 +370,10 @@ function loadData() {
       }
       raw=(json.holdings||[]).filter(h=>h["Holding ID"]).map(normalizeRow);
       snapshot=(json.snapshot||[]).map(normalizeRow);
+      window._perfData=(json.performance||[]).map(normalizeRow);
+      window._merchantsData=(json.merchants||[]).map(normalizeRow);
+      window._targetsData=(json.targets||[]).map(normalizeRow);
+      renderMerchants();
       buildFilters();
       applyFilters();
       renderCalendar();
@@ -504,6 +603,179 @@ function toast(msg,isErr){
   const t=document.getElementById('toast');
   t.textContent=msg; t.className='toast show '+(isErr?'err':'ok');
   setTimeout(()=>t.className='toast',3500);
+}
+
+
+// ============================================
+// TAB SWITCHING
+// ============================================
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  el.classList.add('active');
+  if (tab === 'performance') renderPerformance();
+}
+
+// ============================================
+// PERFORMANCE TAB
+// ============================================
+function renderPerformance() {
+  const view = document.getElementById('perf-view').value;
+  const monthFilter = document.getElementById('perf-month').value;
+  const perf = window._perfData || [];
+  const targets = window._targetsData || [];
+  const months = ['january_2026','february_2026','march_2026','april_2026','may_2026','june_2026','july_2026','august_2026','september_2026','october_2026','november_2026','december_2026'];
+  const monthLabels = {'january_2026':'Ene','february_2026':'Feb','march_2026':'Mar','april_2026':'Abr','may_2026':'May','june_2026':'Jun','july_2026':'Jul','august_2026':'Ago','september_2026':'Sep','october_2026':'Oct','november_2026':'Nov','december_2026':'Dic'};
+
+  // Filter months that have data
+  const availableMonths = [...new Set(perf.map(r => r.month_label))].sort((a,b) => months.indexOf(a) - months.indexOf(b));
+
+  // Populate month filter
+  const mSel = document.getElementById('perf-month');
+  const curVal = mSel.value;
+  mSel.innerHTML = '<option value="all">Todos los meses</option>';
+  availableMonths.forEach(m => {
+    const op = document.createElement('option');
+    op.value = m; op.textContent = monthLabels[m] || m;
+    if (m === curVal) op.selected = true;
+    mSel.appendChild(op);
+  });
+
+  const filteredMonths = monthFilter === 'all' ? availableMonths : [monthFilter];
+
+  // Aggregate data by month
+  function getMonthData(month, manager) {
+    const rows = perf.filter(r => r.month_label === month && (manager === 'all' || r.account_manager === manager));
+    if (!rows.length) return null;
+    const sum = (k) => rows.reduce((s,r) => s + (parseFloat(r[k]) || 0), 0);
+    const avg = (k) => rows.reduce((s,r) => s + (parseFloat(r[k]) || 0), 0) / rows.length;
+    const gmv = sum('gmv');
+    const npp = sum('npp');
+    const npp_target = gmv * 0.08;
+    const avail_budget = npp - npp_target;
+    return {
+      gmv, loans: sum('loans'), mdr: avg('mdr'), user_fee: avg('user_fee'),
+      new_users: sum('new_users'), rec_users: sum('rec_users'),
+      dq_dob22: avg('dq_dob22'), npp, npp_target, avail_budget,
+      late_fees: sum('late_fees'), cogs: sum('cogs'), chargebacks: sum('chargebacks'),
+      new_discount: sum('new_discount'), rec_discount: sum('rec_discount'),
+      total_discount: sum('total_discount'),
+      gmv_to_budget: gmv > 0 ? sum('total_discount') / gmv : 0
+    };
+  }
+
+  function getTarget(month) {
+    const t = targets.find(r => r.mes === month);
+    return t ? parseFloat(t.gmv_target) || 0 : 0;
+  }
+
+  const manager = view === 'all' ? 'all' : view;
+  document.getElementById('perf-title').textContent = (view === 'all' ? 'SAMs' : view) + ' — Performance 2026';
+
+  // Build table
+  const metrics = [
+    {key:'gmv', label:'Total GMV', fmt:'money', section:true},
+    {key:'gmv_target', label:'GMV Target', fmt:'money', sub:true, isTarget:true},
+    {key:'target_achieved', label:'Target Achieved', fmt:'pct_achieved', sub:true, isCalc:true},
+    {key:'loans', label:'Completed Loans', fmt:'number', section:true},
+    {key:'new_users', label:'New Users', fmt:'number', sub:true},
+    {key:'rec_users', label:'Recurrent Users', fmt:'number', sub:true},
+    {key:'dq_dob22', label:'DQ Rate', fmt:'pct', section:true},
+    {key:'npp', label:'Current NPP #', fmt:'money', sub:true},
+    {key:'npp_pct', label:'Current NPP %', fmt:'pct_npp', sub:true, isCalc:true},
+    {key:'npp_target', label:'NPP Target 8%', fmt:'money', sub:true, isCalc:true},
+    {key:'avail_budget', label:'Available Budget', fmt:'money_signed', sub:true, isCalc:true},
+    {key:'mdr', label:'MDR', fmt:'pct', sub:true},
+    {key:'user_fee', label:'User Fee', fmt:'pct', sub:true},
+    {key:'total_discount', label:'Total Discount Use', fmt:'money', section:true},
+    {key:'rec_discount', label:'Discount Recurrent', fmt:'money', sub:true},
+    {key:'new_discount', label:'Discount New', fmt:'money', sub:true},
+    {key:'gmv_to_budget', label:'GMV to Budget Ratio', fmt:'pct3', sub:true, isCalc:true},
+  ];
+
+  const fmtMoney = v => v === null || v === undefined ? '—' : '$' + Math.abs(v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : v.toFixed(0));
+  const fmtMoneyFull = v => v === null || v === undefined ? '—' : (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('es-MX', {maximumFractionDigits:0});
+  const fmtPct = v => v === null || v === undefined || isNaN(v) ? '—' : (v*100).toFixed(2) + '%';
+  const fmtPct3 = v => v === null || v === undefined || isNaN(v) ? '—' : (v*100).toFixed(2) + '%';
+  const fmtNum = v => v === null || v === undefined ? '—' : parseFloat(v) >= 1000 ? (parseFloat(v)/1000).toFixed(1)+'K' : parseFloat(v).toLocaleString('es-MX');
+
+  function formatVal(val, fmt, data) {
+    if (fmt === 'money') return fmtMoney(val);
+    if (fmt === 'money_signed') {
+      const s = fmtMoney(Math.abs(val));
+      return val < 0 ? '<span class="pct-red">-' + s + '</span>' : '<span class="pct-green">+' + s + '</span>';
+    }
+    if (fmt === 'number') return fmtNum(val);
+    if (fmt === 'pct') return fmtPct(val);
+    if (fmt === 'pct3') return fmtPct3(val);
+    if (fmt === 'pct_npp') {
+      const pct = data && data.gmv > 0 ? data.npp / data.gmv : 0;
+      return fmtPct(pct);
+    }
+    if (fmt === 'pct_achieved') {
+      if (!val || val === 0) return '—';
+      const cls = val >= 1 ? 'pct-green' : val >= 0.9 ? 'pct-yellow' : 'pct-red';
+      return '<span class="' + cls + '">' + (val*100).toFixed(0) + '%</span>';
+    }
+    return val !== null && val !== undefined ? val : '—';
+  }
+
+  // Build header row
+  let headers = '<th>Métrica</th>';
+  filteredMonths.forEach(m => { headers += '<th>' + (monthLabels[m] || m) + '</th>'; });
+
+  // Build data rows
+  const monthDataMap = {};
+  filteredMonths.forEach(m => { monthDataMap[m] = getMonthData(m, manager); });
+
+  let rows = '';
+  metrics.forEach(metric => {
+    const isSect = metric.section;
+    const cls = isSect ? 'metric-section-hdr' : (metric.sub ? 'metric-sub-row' : '');
+    rows += '<tr class="' + cls + '"><td>' + metric.label + '</td>';
+    filteredMonths.forEach(m => {
+      const d = monthDataMap[m];
+      let val = null;
+      if (!d) { rows += '<td>—</td>'; return; }
+      if (metric.key === 'gmv_target') val = getTarget(m);
+      else if (metric.key === 'target_achieved') val = getTarget(m) > 0 ? d.gmv / getTarget(m) : null;
+      else if (metric.key === 'npp_pct') val = d.gmv > 0 ? d.npp / d.gmv : 0;
+      else val = d[metric.key];
+      rows += '<td>' + formatVal(val, metric.fmt, d) + '</td>';
+    });
+    rows += '</tr>';
+  });
+
+  document.getElementById('perf-container').innerHTML = '<div class="perf-table-wrap"><table class="perf-table"><thead><tr>' + headers + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function renderMerchants() {
+  const merchants = window._merchantsData || [];
+  const owners = ['Delia Tellez', 'Alex Martinez'];
+  const grid = document.getElementById('merchants-grid');
+  if (!merchants.length) { grid.innerHTML = '<div class="empty-box"><div class="empty-lbl">Sin datos de merchants</div></div>'; return; }
+
+  grid.innerHTML = owners.map(owner => {
+    const om = merchants.filter(m => m.account_manager === owner);
+    const active = om.filter(m => m.merchant_status === 'Active');
+    const churn = om.filter(m => m.merchant_status === 'Churn');
+    const ini = owner.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const churnRate = om.length > 0 ? (churn.length / om.length * 100).toFixed(0) : 0;
+
+    return '<div class="merchant-card">' +
+      '<div class="merchant-card-title"><span class="ava-sm" style="width:28px;height:28px;font-size:11px">' + ini + '</span>' + owner + '</div>' +
+      '<div class="merchant-stats">' +
+        '<div class="mstat"><div class="mstat-val">' + om.length + '</div><div class="mstat-lbl">Total</div></div>' +
+        '<div class="mstat"><div class="mstat-val" style="color:var(--green-d)">' + active.length + '</div><div class="mstat-lbl">Activos</div></div>' +
+        '<div class="mstat"><div class="mstat-val" style="color:var(--red-d)">' + churn.length + '</div><div class="mstat-lbl">Churn</div></div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:8px"><span>Churn Rate</span><span style="font-weight:700;color:' + (churnRate > 40 ? 'var(--red-d)' : churnRate > 25 ? 'var(--yellow)' : 'var(--green-d)') + '">' + churnRate + '%</span></div>' +
+      '<div class="merchant-list">' +
+        churn.slice(0,10).map(m => '<div class="merchant-item"><span>' + m.merchant_name + '</span><span class="badge-no" style="font-size:9px;padding:2px 6px">Churn</span></div>').join('') +
+      '</div>' +
+    '</div>';
+  }).join('');
 }
 
 loadData();
