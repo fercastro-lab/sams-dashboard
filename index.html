@@ -648,8 +648,8 @@ function renderPerformance() {
   function getMonthData(month, manager) {
     const rows = perf.filter(r => r.month_label === month && (manager === 'all' || r.account_manager === manager));
     if (!rows.length) return null;
-    const sum = (k) => rows.reduce((s,r) => s + (parseFloat(r[k]) || 0), 0);
-    const avg = (k) => rows.reduce((s,r) => s + (parseFloat(r[k]) || 0), 0) / rows.length;
+    const sum = (k) => rows.reduce((s,r) => { const v=parseFloat(r[k]); return s + (isNaN(v)?0:v); }, 0);
+    const avg = (k) => { const vals=rows.map(r=>parseFloat(r[k])).filter(v=>!isNaN(v)); return vals.length>0?vals.reduce((a,b)=>a+b,0)/vals.length:0; };
     const gmv = sum('gmv');
     const npp = sum('npp');
     const npp_target = gmv * 0.08;
@@ -694,11 +694,12 @@ function renderPerformance() {
     {key:'gmv_to_budget', label:'GMV to Budget Ratio', fmt:'pct3', sub:true, isCalc:true},
   ];
 
-  const fmtMoney = v => v === null || v === undefined ? '—' : '$' + Math.abs(v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : v.toFixed(0));
-  const fmtMoneyFull = v => v === null || v === undefined ? '—' : (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('es-MX', {maximumFractionDigits:0});
-  const fmtPct = v => v === null || v === undefined || isNaN(v) ? '—' : (v*100).toFixed(2) + '%';
-  const fmtPct3 = v => v === null || v === undefined || isNaN(v) ? '—' : (v*100).toFixed(2) + '%';
-  const fmtNum = v => v === null || v === undefined ? '—' : parseFloat(v) >= 1000 ? (parseFloat(v)/1000).toFixed(1)+'K' : parseFloat(v).toLocaleString('es-MX');
+  const toN = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+  const fmtMoney = v => { const n = toN(v); if(v===null||v===undefined||v==='') return '—'; return '$' + (Math.abs(n) >= 1000000 ? (Math.abs(n)/1000000).toFixed(1)+'M' : Math.abs(n) >= 1000 ? (Math.abs(n)/1000).toFixed(1)+'K' : Math.abs(n).toFixed(0)); };
+  const fmtMoneyFull = v => { const n=toN(v); return (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('es-MX',{maximumFractionDigits:0}); };
+  const fmtPct = v => { const n=toN(v); return (v===null||v===undefined||v===''||isNaN(parseFloat(v)))?'—':(n*100).toFixed(2)+'%'; };
+  const fmtPct3 = v => { const n=toN(v); return (v===null||v===undefined||v===''||isNaN(parseFloat(v)))?'—':(n*100).toFixed(2)+'%'; };
+  const fmtNum = v => { const n=toN(v); return (v===null||v===undefined||v==='')?'—':n>=1000?(n/1000).toFixed(1)+'K':n.toLocaleString('es-MX'); };
 
   function formatVal(val, fmt, data) {
     if (fmt === 'money') return fmtMoney(val);
