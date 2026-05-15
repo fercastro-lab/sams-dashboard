@@ -159,7 +159,10 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
     <div class="divider-v"></div>
     <div class="filter-group">
       <span class="filter-label"><i class="bi bi-buildings"></i> Holding</span>
-      <select class="fsel" id="f-holding" onchange="applyFilters()"><option value="">Todos</option></select>
+      <div class="search-wrap" style="max-width:200px">
+        <i class="bi bi-buildings"></i>
+        <input class="search" id="f-holding" placeholder="Buscar holding..." oninput="applyFilters()">
+      </div>
     </div>
     <div class="divider-v"></div>
     <div class="filter-group">
@@ -305,9 +308,7 @@ function buildFilters() {
     s.innerHTML=''; s.appendChild(f);
     owners.forEach(o=>{const op=document.createElement('option');op.value=o;op.textContent=o;s.appendChild(op);});
   });
-  const hs=document.getElementById('f-holding'), hf=hs.options[0].cloneNode(true);
-  hs.innerHTML=''; hs.appendChild(hf);
-  holdings.forEach(h=>{const op=document.createElement('option');op.value=h;op.textContent=h;hs.appendChild(op);});
+  // f-holding is now a text input, no need to populate
   const ss=document.getElementById('f-sams'), sf=ss.options[0].cloneNode(true);
   ss.innerHTML=''; ss.appendChild(sf);
   sams.forEach(s=>{const op=document.createElement('option');op.value=s;op.textContent=s;ss.appendChild(op);});
@@ -315,13 +316,13 @@ function buildFilters() {
 
 function applyFilters() {
   const owner=document.getElementById('f-owner').value;
-  const holding=document.getElementById('f-holding').value;
+  const holding=document.getElementById('f-holding').value.toLowerCase().trim();
   const status=document.getElementById('f-status').value;
   const sams=document.getElementById('f-sams').value;
   const search=document.getElementById('f-search').value.toLowerCase().trim();
   filtered=raw.filter(h=>{
     if(owner&&h['Owner']!==owner)return false;
-    if(holding&&h['Nombre']!==holding)return false;
+    if(holding&&!(h['Nombre']||'').toLowerCase().includes(holding))return false;
     if(status&&h['Active Contact']!==status)return false;
     if(sams&&h['SAMs Status']!==sams)return false;
     if(search&&!(h['Nombre']||'').toLowerCase().includes(search))return false;
@@ -384,7 +385,16 @@ function renderOwnerCards(){
 
 function renderTable(){
   const sorted=[...filtered];
-  if(sortCol){sorted.sort((a,b)=>{const av=a[sortCol]||'',bv=b[sortCol]||'';return av<bv?-sortDir:av>bv?sortDir:0;});}
+  if(sortCol){sorted.sort((a,b)=>{
+    let av=a[sortCol]||'', bv=b[sortCol]||'';
+    // Numeric sort for GMV and Merchants
+    const numCols=['GMV Last Month','Merchant Quantity'];
+    if(numCols.includes(sortCol)){
+      av=parseFloat(av)||0; bv=parseFloat(bv)||0;
+      return (av-bv)*sortDir;
+    }
+    return av<bv?-sortDir:av>bv?sortDir:0;
+  });}
   const start=(page-1)*PER_PAGE, pageData=sorted.slice(start,start+PER_PAGE), totalPages=Math.ceil(sorted.length/PER_PAGE);
   if(!pageData.length){
     document.getElementById('tbl-container').innerHTML=`<div class="empty-box"><div class="empty-icon"><i class="bi bi-search"></i></div><div class="empty-lbl">No hay holdings con los filtros aplicados</div></div>`;
