@@ -392,6 +392,7 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
 const API = "https://script.google.com/macros/s/AKfycbw9mG--q5ThCaF9UpREQlqAsgwGdBuxM96l0HKQh5G5tct-MQa9K5Rs8YHObhvPj5xE/exec";
 const PER_PAGE = 25;
 let raw=[], filtered=[], snapshot=[], page=1, tabFilter='all', sortCol='', sortDir=1;
+let tgtSortCol='', tgtSortDir=-1;
 
 function loadData() {
   const btn=document.getElementById("btn-ref"), ic=document.getElementById("ref-icon");
@@ -949,11 +950,39 @@ function renderTargets() {
     {lbl:'Dic',tgt:'tgt_dec',cur:'cur_dec',pct:'pct_dec',g25:'gmv25_dec',yoy:'yoy_dec'}
   ];
 
+  // Sort merchants
+  if (tgtSortCol) {
+    merchants = merchants.slice().sort(function(a,b) {
+      let av = a[tgtSortCol]||'', bv = b[tgtSortCol]||'';
+      // Numeric cols
+      const numCols = ['target_2026','ytd_2026','target_completion','weight',
+        'tgt_jan','tgt_feb','tgt_mar','tgt_apr','tgt_may','tgt_jun','tgt_jul','tgt_aug','tgt_sep','tgt_oct','tgt_nov','tgt_dec',
+        'cur_jan','cur_feb','cur_mar','cur_apr','cur_may','cur_jun','cur_jul','cur_aug','cur_sep','cur_oct','cur_nov','cur_dec',
+        'pct_jan','pct_feb','pct_mar','pct_apr','pct_may','pct_jun','pct_jul','pct_aug','pct_sep','pct_oct','pct_nov','pct_dec'];
+      if (numCols.indexOf(tgtSortCol) !== -1) {
+        av = parseVal(av); bv = parseVal(bv);
+        return (av - bv) * tgtSortDir;
+      }
+      return av < bv ? -tgtSortDir : av > bv ? tgtSortDir : 0;
+    });
+  }
+
+  function thSort(label, col) {
+    const ic = tgtSortCol===col ? (tgtSortDir===1 ? '↑' : '↓') : '⇅';
+    const style = tgtSortCol===col ? 'color:var(--cyan);cursor:pointer' : 'cursor:pointer;opacity:.7';
+    return '<th onclick="tgtSort(''+col+'')" style="'+style+'">'+label+' <span style="font-size:9px">'+ic+'</span></th>';
+  }
+
   // Build table header
-  let thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:150px;z-index:2">Merchant</th>' +
-    '<th>Owner</th><th>Segmento</th><th>Peso</th><th>Target Anual</th><th>YTD Real</th><th>% Cumpl</th>';
+  let thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:150px;z-index:2;cursor:pointer" onclick="tgtSort('merchant_name')">Merchant <span style="font-size:9px">'+(tgtSortCol==='merchant_name'?(tgtSortDir===1?'↑':'↓'):'⇅')+'</span></th>' +
+    thSort('Owner','merchant_account_manager') +
+    thSort('Segmento','merchant_segment') +
+    thSort('Peso','weight') +
+    thSort('Target Anual','target_2026') +
+    thSort('YTD Real','ytd_2026') +
+    thSort('% Cumpl','target_completion');
   months.forEach(function(m) {
-    thead += '<th>'+m.lbl+' Tgt</th><th>'+m.lbl+' Real</th><th>'+m.lbl+' %</th><th>'+m.lbl+' 25</th><th>YoY '+m.lbl+'</th>';
+    thead += thSort(m.lbl+' Tgt', m.tgt) + thSort(m.lbl+' Real', m.cur) + thSort(m.lbl+' %', m.pct) + thSort(m.lbl+' 25', m.g25) + thSort('YoY '+m.lbl, m.yoy);
   });
   thead += '</tr>';
 
@@ -990,6 +1019,16 @@ function renderTargets() {
 
   document.getElementById('tgt-container').innerHTML =
     '<div class="perf-table-wrap"><table class="perf-table"><thead>'+thead+'</thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function tgtSort(col) {
+  if (tgtSortCol === col) {
+    tgtSortDir = tgtSortDir === 1 ? -1 : 1;
+  } else {
+    tgtSortCol = col;
+    tgtSortDir = -1; // start descending
+  }
+  renderTargets();
 }
 
 loadData();
