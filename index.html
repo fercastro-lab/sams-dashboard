@@ -881,12 +881,20 @@ function renderTargets() {
     return '$'+(Math.abs(n)>=1000000?(Math.abs(n)/1000000).toFixed(1)+'M':Math.abs(n)>=1000?(Math.abs(n)/1000).toFixed(0)+'K':Math.abs(n).toFixed(0));
   };
   const fmtPct = function(v) {
-    const n = parseFloat(String(v).replace('%',''))||0;
+    if (!v || v === '' || v === '0') return '<span class="empty-cell">—</span>';
+    const s = String(v).trim();
+    // Already a percentage string like "25.20%" or decimal like "0.2520"
+    if (s.endsWith('%')) return parseFloat(s).toFixed(1)+'%';
+    // Decimal — multiply by 100
+    const n = parseFloat(s)||0;
     if (n === 0) return '<span class="empty-cell">—</span>';
-    return n.toFixed(1)+'%';
+    return (n*100).toFixed(1)+'%';
   };
   const clsPct = function(v) {
-    const n = parseFloat(String(v).replace('%',''))||0;
+    const s = String(v||'').trim();
+    let n;
+    if (s.endsWith('%')) n = parseFloat(s);
+    else n = (parseFloat(s)||0)*100;
     return n >= 90 ? 'pct-green' : n >= 70 ? 'pct-yellow' : 'pct-red';
   };
 
