@@ -266,10 +266,15 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
         <div class="table-ttl">Holdings — Estado actual</div>
         <div class="table-meta" id="tbl-meta">Cargando...</div>
       </div>
-      <div class="tab-btns">
-        <button class="tab-btn active" onclick="setTab('all',this)">Todos</button>
-        <button class="tab-btn" onclick="setTab('yes',this)">Solo Yes</button>
-        <button class="tab-btn" onclick="setTab('no',this)">Solo No</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="tab-btns">
+          <button class="tab-btn active" onclick="setTab('all',this)">Todos</button>
+          <button class="tab-btn" onclick="setTab('yes',this)">Solo Yes</button>
+          <button class="tab-btn" onclick="setTab('no',this)">Solo No</button>
+        </div>
+        <button onclick="downloadCSV()" style="height:28px;padding:0 12px;background:var(--foam);border:1.5px solid var(--aqua);border-radius:100px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;color:var(--sea);cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap">
+          <i class="bi bi-download"></i> Descargar CSV
+        </button>
       </div>
     </div>
     <div id="tbl-container">
@@ -397,10 +402,13 @@ let tgtSortCol='', tgtSortDir=-1;
 function loadData() {
   const btn=document.getElementById("btn-ref"), ic=document.getElementById("ref-icon");
   btn.disabled=true; ic.classList.add("spin");
+  // Limpia callback anterior si existe
   const old = document.getElementById("jsonp-script");
   if (old) old.remove();
+  // JSONP bypasea CORS completamente
   window.__jsonpCallback = function(json) {
     try {
+      // Normaliza todos los valores a string para evitar errores de tipo
       function normalizeRow(h) {
         const out = {};
         Object.keys(h).forEach(function(k) {
@@ -418,6 +426,7 @@ function loadData() {
       window._targetsData=(json.targets||[]).map(normalizeRow);
       window._merchantTargets=(json.merchant_targets||[]).map(normalizeRow);
       renderMerchants();
+      // renderTargets called on tab switch
       buildFilters();
       applyFilters();
       renderCalendar();
@@ -443,12 +452,15 @@ function loadData() {
 
 function buildFilters() {
   const owners=[...new Set(raw.map(h=>h['Owner']).filter(Boolean))].sort();
+  const holdings=[...new Set(raw.map(h=>h['Nombre']).filter(Boolean))].sort();
   const sams=[...new Set(raw.map(h=>h['SAMs Status']).filter(Boolean))].sort();
+
   ['f-owner','cal-owner'].forEach(id=>{
     const s=document.getElementById(id), f=s.options[0].cloneNode(true);
     s.innerHTML=''; s.appendChild(f);
     owners.forEach(o=>{const op=document.createElement('option');op.value=o;op.textContent=o;s.appendChild(op);});
   });
+  // f-holding is now a text input, no need to populate
   const ss=document.getElementById('f-sams'), sf=ss.options[0].cloneNode(true);
   ss.innerHTML=''; ss.appendChild(sf);
   sams.forEach(s=>{const op=document.createElement('option');op.value=s;op.textContent=s;ss.appendChild(op);});
@@ -498,6 +510,7 @@ function renderOwnerCards(){
     const total=oh.length, yes=oh.filter(h=>h['Active Contact']==='Yes').length, no=total-yes;
     const rate=total>0?(yes/total*100).toFixed(1):'0.0';
     const ini=(owner&&typeof owner==='string'?owner:'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    // GMV acumulado — solo holdings con active contact YES
     const gmvTotal=oh.reduce((sum,h)=>{const v=parseFloat(h['GMV Last Month'])||0;return sum+v;},0);
     const gmvActive=oh.filter(h=>h['Active Contact']==='Yes').reduce((sum,h)=>{const v=parseFloat(h['GMV Last Month'])||0;return sum+v;},0);
     const gmvFmt=n=>'$'+Math.round(n).toLocaleString('es-MX');
@@ -526,6 +539,7 @@ function renderTable(){
   const sorted=[...filtered];
   if(sortCol){sorted.sort((a,b)=>{
     let av=a[sortCol]||'', bv=b[sortCol]||'';
+    // Numeric sort for GMV and Merchants
     const numCols=['GMV Last Month','Merchant Quantity'];
     if(numCols.includes(sortCol)){
       av=parseFloat(av)||0; bv=parseFloat(bv)||0;
@@ -597,7 +611,7 @@ function sortBy(col){
     sortDir = sortDir===1 ? -1 : 1;
   } else {
     sortCol=col;
-    sortDir=-1;
+    sortDir=-1; // empieza de mayor a menor
   }
   renderTable();
 }
@@ -644,6 +658,7 @@ function toast(msg,isErr){
   setTimeout(()=>t.className='toast',3500);
 }
 
+
 // ============================================
 // TAB SWITCHING
 // ============================================
@@ -667,8 +682,10 @@ function renderPerformance() {
   const months = ['january_2026','february_2026','march_2026','april_2026','may_2026','june_2026','july_2026','august_2026','september_2026','october_2026','november_2026','december_2026'];
   const monthLabels = {'january_2026':'Ene','february_2026':'Feb','march_2026':'Mar','april_2026':'Abr','may_2026':'May','june_2026':'Jun','july_2026':'Jul','august_2026':'Ago','september_2026':'Sep','october_2026':'Oct','november_2026':'Nov','december_2026':'Dic'};
 
+  // Filter months that have data
   const availableMonths = [...new Set(perf.map(r => r.month_label))].sort((a,b) => months.indexOf(a) - months.indexOf(b));
 
+  // Populate month filter
   const mSel = document.getElementById('perf-month');
   const curVal = mSel.value;
   mSel.innerHTML = '<option value="all">Todos los meses</option>';
@@ -681,6 +698,7 @@ function renderPerformance() {
 
   const filteredMonths = monthFilter === 'all' ? availableMonths : [monthFilter];
 
+  // Aggregate data by month
   function getMonthData(month, manager) {
     const rows = perf.filter(r => r.month_label === month && (manager === 'all' || r.account_manager === manager));
     if (!rows.length) return null;
@@ -709,6 +727,7 @@ function renderPerformance() {
   const manager = view === 'all' ? 'all' : view;
   document.getElementById('perf-title').textContent = (view === 'all' ? 'SAMs' : view) + ' — Performance 2026';
 
+  // Build table
   const metrics = [
     {key:'gmv', label:'Total GMV', fmt:'money', section:true},
     {key:'gmv_target', label:'GMV Target', fmt:'money', sub:true, isTarget:true},
@@ -731,6 +750,7 @@ function renderPerformance() {
 
   const toN = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
   const fmtMoney = v => { const n = toN(v); if(v===null||v===undefined||v==='') return '—'; return '$' + (Math.abs(n) >= 1000000 ? (Math.abs(n)/1000000).toFixed(1)+'M' : Math.abs(n) >= 1000 ? (Math.abs(n)/1000).toFixed(1)+'K' : Math.abs(n).toFixed(0)); };
+  const fmtMoneyFull = v => { const n=toN(v); return (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('es-MX',{maximumFractionDigits:0}); };
   const fmtPct = v => { const n=toN(v); return (v===null||v===undefined||v===''||isNaN(parseFloat(v)))?'—':(n*100).toFixed(2)+'%'; };
   const fmtPct3 = v => { const n=toN(v); return (v===null||v===undefined||v===''||isNaN(parseFloat(v)))?'—':(n*100).toFixed(2)+'%'; };
   const fmtNum = v => { const n=toN(v); return (v===null||v===undefined||v==='')?'—':n>=1000?(n/1000).toFixed(1)+'K':n.toLocaleString('es-MX'); };
@@ -756,9 +776,11 @@ function renderPerformance() {
     return val !== null && val !== undefined ? val : '—';
   }
 
+  // Build header row
   let headers = '<th>Métrica</th>';
   filteredMonths.forEach(m => { headers += '<th>' + (monthLabels[m] || m) + '</th>'; });
 
+  // Build data rows
   const monthDataMap = {};
   filteredMonths.forEach(m => { monthDataMap[m] = getMonthData(m, manager); });
 
@@ -797,8 +819,12 @@ function renderMerchants() {
     const churn = om.filter(function(m) { return m.merchant_status === 'Churn'; });
     const ini = (owner&&typeof owner==='string'?owner:'?').split(' ').map(function(w){return w[0];}).slice(0,2).join('').toUpperCase();
     const churnRate = om.length > 0 ? (churn.length / om.length * 100).toFixed(0) : 0;
+
+    // GMV perdido = suma del avg de los 3 meses previos de los churneados
     const gmvPerdido = churn.reduce(function(s,m) { return s+(parseFloat(m.gmv_avg_prev3months)||0); }, 0);
+    // GMV activos
     const gmvActivo = active.reduce(function(s,m) { return s+(parseFloat(m.gmv_last_month)||0); }, 0);
+
     const churnColor = churnRate > 40 ? 'var(--red-d)' : churnRate > 25 ? 'var(--yellow)' : 'var(--green-d)';
 
     const churnList = churn.slice().sort(function(a,b) {
@@ -863,7 +889,9 @@ function renderTargets() {
   const fmtPct = function(v) {
     if (!v || v === '' || v === '0') return '<span class="empty-cell">—</span>';
     const s = String(v).trim();
+    // Already a percentage string like "25.20%" or decimal like "0.2520"
     if (s.endsWith('%')) return parseFloat(s).toFixed(1)+'%';
+    // Decimal — multiply by 100
     const n = parseFloat(s)||0;
     if (n === 0) return '<span class="empty-cell">—</span>';
     return (n*100).toFixed(1)+'%';
@@ -876,6 +904,7 @@ function renderTargets() {
     return n >= 90 ? 'pct-green' : n >= 70 ? 'pct-yellow' : 'pct-red';
   };
 
+  // Filter
   let merchants = rawTargets.filter(function(r) {
     if (!r.merchant_id || r.merchant_id === 'merchant_id') return false;
     if (ownerFilter !== 'all' && r.merchant_account_manager !== ownerFilter) return false;
@@ -884,6 +913,7 @@ function renderTargets() {
     return true;
   });
 
+  // Populate segment filter
   const segs = [...new Set(rawTargets.filter(function(r){return r.merchant_id&&r.merchant_id!=='merchant_id';}).map(function(r){return r.merchant_segment;}).filter(Boolean))].sort();
   const segSel = document.getElementById('tgt-segment');
   const curSeg = segSel.value;
@@ -895,6 +925,7 @@ function renderTargets() {
     segSel.appendChild(op);
   });
 
+  // Summary stats
   const totalTarget = merchants.reduce(function(s,r){return s+parseVal(r.target_2026);},0);
   const totalYTD = merchants.reduce(function(s,r){return s+parseVal(r.ytd_2026);},0);
   const totalCompletion = totalTarget>0?totalYTD/totalTarget*100:0;
@@ -908,6 +939,7 @@ function renderTargets() {
     return '<div class="stat"><div class="stat-over">'+s.label+'</div><div class="stat-val" style="color:'+s.color+';font-size:28px">'+s.val+'</div><div class="stat-foot">'+s.sub+'</div></div>';
   }).join('');
 
+  // Months config
   const months = [
     {lbl:'Ene',tgt:'tgt_jan',cur:'cur_jan',pct:'pct_jan',g25:'gmv25_jan',yoy:'yoy_jan'},
     {lbl:'Feb',tgt:'tgt_feb',cur:'cur_feb',pct:'pct_feb',g25:'gmv25_feb',yoy:'yoy_feb'},
@@ -923,9 +955,11 @@ function renderTargets() {
     {lbl:'Dic',tgt:'tgt_dec',cur:'cur_dec',pct:'pct_dec',g25:'gmv25_dec',yoy:'yoy_dec'}
   ];
 
+  // Sort merchants
   if (tgtSortCol) {
     merchants = merchants.slice().sort(function(a,b) {
       let av = a[tgtSortCol]||'', bv = b[tgtSortCol]||'';
+      // Numeric cols
       const numCols = ['target_2026','ytd_2026','target_completion','weight',
         'tgt_jan','tgt_feb','tgt_mar','tgt_apr','tgt_may','tgt_jun','tgt_jul','tgt_aug','tgt_sep','tgt_oct','tgt_nov','tgt_dec',
         'cur_jan','cur_feb','cur_mar','cur_apr','cur_may','cur_jun','cur_jul','cur_aug','cur_sep','cur_oct','cur_nov','cur_dec',
@@ -938,16 +972,14 @@ function renderTargets() {
     });
   }
 
-  // ✅ FIX: thSort usa template literals para evitar conflicto de comillas
   function thSort(label, col) {
     const ic = tgtSortCol===col ? (tgtSortDir===1 ? '↑' : '↓') : '⇅';
     const style = tgtSortCol===col ? 'color:var(--cyan);cursor:pointer' : 'cursor:pointer;opacity:.7';
-    return `<th onclick="tgtSort('${col}')" style="${style}">${label} <span style="font-size:9px">${ic}</span></th>`;
+    return '<th onclick="tgtSort(''+col+'')" style="'+style+'">'+label+' <span style="font-size:9px">'+ic+'</span></th>';
   }
 
-  // ✅ FIX: primer th también usa template literal
-  const merchantSortIc = tgtSortCol==='merchant_name' ? (tgtSortDir===1?'↑':'↓') : '⇅';
-  let thead = `<tr><th style="text-align:left;position:sticky;left:0;min-width:150px;z-index:2;cursor:pointer" onclick="tgtSort('merchant_name')">Merchant <span style="font-size:9px">${merchantSortIc}</span></th>` +
+  // Build table header
+  let thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:150px;z-index:2;cursor:pointer" onclick="tgtSort('merchant_name')">Merchant <span style="font-size:9px">'+(tgtSortCol==='merchant_name'?(tgtSortDir===1?'↑':'↓'):'⇅')+'</span></th>' +
     thSort('Owner','merchant_account_manager') +
     thSort('Segmento','merchant_segment') +
     thSort('Peso','weight') +
@@ -959,6 +991,7 @@ function renderTargets() {
   });
   thead += '</tr>';
 
+  // Build rows
   const rows = merchants.slice(0,300).map(function(r) {
     const owner = (r.merchant_account_manager||'').replace('Martinez','M.').replace('Tellez','T.');
     const pctVal = parseVal(r.target_completion)*100;
@@ -998,12 +1031,56 @@ function tgtSort(col) {
     tgtSortDir = tgtSortDir === 1 ? -1 : 1;
   } else {
     tgtSortCol = col;
-    tgtSortDir = -1;
+    tgtSortDir = -1; // start descending
   }
   renderTargets();
 }
 
+function downloadCSV() {
+  if (!filtered.length) {
+    toast('No hay datos para descargar', true);
+    return;
+  }
+
+  const cols = [
+    {k:'Nombre', l:'Holding'},
+    {k:'Owner', l:'Owner'},
+    {k:'Active Contact', l:'Active Contact'},
+    {k:'Active Contact Last Confirmed', l:'Confirmado'},
+    {k:'Último WhatsApp', l:'Último WhatsApp'},
+    {k:'Último Email Reply', l:'Último Email Reply'},
+    {k:'SAMs Status', l:'SAMs Status'},
+    {k:'GMV Last Month', l:'GMV Last Month'},
+    {k:'Merchant Quantity', l:'Merchants'},
+    {k:'Fecha actualización', l:'Fecha actualización'}
+  ];
+
+  // Build CSV
+  const header = cols.map(c => '"' + c.l + '"').join(',');
+  const rows = filtered.map(function(h) {
+    return cols.map(function(c) {
+      const val = h[c.k] || '';
+      // Escape quotes and wrap in quotes
+      return '"' + String(val).replace(/"/g, '""') + '"';
+    }).join(',');
+  });
+
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const today = new Date().toLocaleDateString('es-MX').replace(/\//g, '-');
+  a.href = url;
+  a.download = 'holdings_active_contact_' + today + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('CSV descargado (' + filtered.length + ' holdings)', false);
+}
+
 loadData();
+// Auto-actualiza cada 30 minutos
 setInterval(function(){
   loadData();
 }, 30 * 60 * 1000);
