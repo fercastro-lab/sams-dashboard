@@ -406,7 +406,15 @@ function loadData() {
   const old = document.getElementById("jsonp-script");
   if (old) old.remove();
   // JSONP bypasea CORS completamente
+  // Timeout — desbloquea UI si no responde en 15 segundos
+  const _timeout = setTimeout(function() {
+    btn.disabled=false; ic.classList.remove("spin");
+    toast("Timeout — el servidor tardó demasiado. Intenta de nuevo.", true);
+    document.getElementById("tbl-container").innerHTML='<div class="empty-box"><div class="empty-icon"><i class="bi bi-exclamation-triangle"></i></div><div class="empty-lbl">No se pudieron cargar los datos.<br><small style="color:var(--text3)">Verifica que el script de Google esté activo y el token de HubSpot sea válido.</small></div></div>';
+  }, 15000);
+
   window.__jsonpCallback = function(json) {
+    clearTimeout(_timeout);
     try {
       // Normaliza todos los valores a string para evitar errores de tipo
       function normalizeRow(h) {
