@@ -435,6 +435,15 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
     </div>
     <div class="divider-v"></div>
     <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-shop"></i> Canal</span>
+      <select class="fsel" id="det-channel" onchange="renderMerchantDetail()">
+        <option value="all">Todos</option>
+        <option value="Online">Online</option>
+        <option value="Offline">Offline</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group">
       <span class="filter-label"><i class="bi bi-star"></i> Top 20</span>
       <select class="fsel" id="det-top20" onchange="renderMerchantDetail()">
         <option value="all">Todos los merchants</option>
@@ -1097,6 +1106,7 @@ let detExpanded = null; // merchant_id actualmente expandido (o null)
 
 function renderMerchantDetail() {
   const ownerFilter = document.getElementById('det-owner').value;
+  const channelFilter = document.getElementById('det-channel').value;
   const top20Filter = document.getElementById('det-top20').value;
   const search = document.getElementById('det-search').value.toLowerCase().trim();
   const data = window._merchantDetail || [];
@@ -1114,6 +1124,7 @@ function renderMerchantDetail() {
   let rows = data.filter(function(r) {
     if (!r.merchant_id || r.merchant_id === 'merchant_id') return false;
     if (ownerFilter !== 'all' && r.account_manager !== ownerFilter) return false;
+    if (channelFilter !== 'all' && r.merchant_channel !== channelFilter) return false;
     if (top20Filter === 'yes' && r.is_top20 !== 'Sí') return false;
     if (search && !(r.merchant_name||'').toLowerCase().includes(search)) return false;
     return true;
@@ -1136,7 +1147,7 @@ function renderMerchantDetail() {
   rows = rows.slice().sort(function(a,b){ return (parseFloat(b.gmv)||0) - (parseFloat(a.gmv)||0); });
 
   const thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:180px;z-index:2">Merchant</th>' +
-    '<th>Owner</th><th>GMV YTD</th><th>CR %</th><th>NPP %</th><th>DQ Rate</th><th>LTV Cohort (P12/P0)</th></tr>';
+    '<th>Owner</th><th>Canal</th><th>GMV YTD</th><th>CR %</th><th>NPP %</th><th>DQ Rate</th><th>LTV Cohort (P12/P0)</th></tr>';
 
   const bodyRows = rows.map(function(r) {
     const owner = (r.account_manager||'').replace('Martinez','M.').replace('Tellez','T.');
@@ -1145,10 +1156,12 @@ function renderMerchantDetail() {
     const ltvCell = hasLtv ? '<span class="pct-green" style="font-weight:800">'+parseFloat(r.ltv_ratio_p12_p0).toFixed(1)+'x</span>' : (isTop20 ? '<span class="empty-cell">calculando…</span>' : '<span class="empty-cell">— (solo Top 20)</span>');
     const clickable = isTop20 ? ' style="cursor:pointer" onclick="toggleDetExpand(\''+r.merchant_id+'\')"' : '';
     const expandIcon = isTop20 ? (detExpanded===r.merchant_id ? '<i class="bi bi-chevron-up" style="margin-right:6px;font-size:10px"></i>' : '<i class="bi bi-chevron-down" style="margin-right:6px;font-size:10px;opacity:.4"></i>') : '';
+    const channelBadge = r.merchant_channel ? '<span class="badge-owner" style="font-size:10px;padding:2px 7px;background:'+(r.merchant_channel==='Online'?'rgba(74,201,227,.15);color:var(--teal)':'rgba(180,140,40,.15);color:#8a6d1a')+'">'+r.merchant_channel+'</span>' : '<span class="empty-cell">—</span>';
 
     let rowHtml = '<tr'+clickable+'>' +
       '<td style="position:sticky;left:0;background:var(--card);font-weight:700;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.merchant_name+'">'+expandIcon+r.merchant_name+'</td>' +
       '<td><span class="badge-owner" style="font-size:10px;padding:2px 7px">'+owner+'</span></td>' +
+      '<td>'+channelBadge+'</td>' +
       '<td>'+fmtM(r.gmv)+'</td>' +
       '<td><span class="'+clsCr(r.cr)+'">'+fmtPct(r.cr)+'</span></td>' +
       '<td>'+fmtPct(r.npp_pct)+'</td>' +
@@ -1158,7 +1171,7 @@ function renderMerchantDetail() {
 
     // Si este merchant está expandido, agregamos una fila extra con el detalle
     if (detExpanded === r.merchant_id && hasLtv) {
-      rowHtml += '<tr><td colspan="7" style="background:var(--surface);padding:16px 20px">' +
+      rowHtml += '<tr><td colspan="8" style="background:var(--surface);padding:16px 20px">' +
         '<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">' +
         '<div><div class="stat-over">RATIO P12/P0</div><div style="font-size:26px;font-weight:800;color:var(--teal)">'+parseFloat(r.ltv_ratio_p12_p0).toFixed(2)+'x</div></div>' +
         '<div style="flex:1;min-width:220px;font-size:12px;color:var(--text2)">Un cliente de <b>'+r.merchant_name+'</b> genera, en promedio, <b>'+parseFloat(r.ltv_ratio_p12_p0).toFixed(1)+'x</b> más GMV acumulado a los 12 meses de su primera compra que en su primer mes. Entre más alto, mejor retiene y crece este merchant a sus clientes.</div>' +
