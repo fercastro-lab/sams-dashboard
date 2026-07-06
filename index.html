@@ -508,7 +508,7 @@ function loadData() {
   };
   const script = document.createElement("script");
   script.id = "jsonp-script";
-  script.src = API + "?callback=__jsonpCallback";
+  script.src = API + "?callback=__jsonpCallback&_=" + Date.now();
   script.onerror = function() {
     toast("Error al cargar datos", true);
     btn.disabled=false; ic.classList.remove("spin");
