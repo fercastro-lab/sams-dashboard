@@ -317,6 +317,37 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
       </select>
     </div>
     <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-calendar3"></i> Mes</span>
+      <select class="fsel" id="tgt-month" onchange="renderTargets()">
+        <option value="all">Todos los meses</option>
+        <option value="jan">Enero</option>
+        <option value="feb">Febrero</option>
+        <option value="mar">Marzo</option>
+        <option value="apr">Abril</option>
+        <option value="may">Mayo</option>
+        <option value="jun">Junio</option>
+        <option value="jul">Julio</option>
+        <option value="aug">Agosto</option>
+        <option value="sep">Septiembre</option>
+        <option value="oct">Octubre</option>
+        <option value="nov">Noviembre</option>
+        <option value="dec">Diciembre</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-bullseye"></i> % Cumplimiento</span>
+      <select class="fsel" id="tgt-completion" onchange="renderTargets()">
+        <option value="0">Todos</option>
+        <option value="0.9">≥ 90%</option>
+        <option value="0.75">≥ 75%</option>
+        <option value="0.5">≥ 50%</option>
+        <option value="0.25">≥ 25%</option>
+        <option value="lt50">&lt; 50%</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
     <div class="search-wrap" style="max-width:220px">
       <i class="bi bi-search"></i>
       <input class="search" id="tgt-search" placeholder="Buscar merchant..." oninput="renderTargets()">
@@ -839,6 +870,8 @@ function renderTargets() {
   const ownerFilter = document.getElementById('tgt-owner').value;
   const segFilter = document.getElementById('tgt-segment').value;
   const search = document.getElementById('tgt-search').value.toLowerCase().trim();
+  const monthFilter = document.getElementById('tgt-month').value;
+  const completionFilter = document.getElementById('tgt-completion').value;
   const rawTargets = window._merchantTargets || [];
 
   if (!rawTargets.length) {
@@ -881,6 +914,12 @@ function renderTargets() {
     if (ownerFilter !== 'all' && r.merchant_account_manager !== ownerFilter) return false;
     if (segFilter !== 'all' && r.merchant_segment !== segFilter) return false;
     if (search && !(r.merchant_name||'').toLowerCase().includes(search)) return false;
+    // Filtro % Cumplimiento: compara target_completion (viene como 0-1) contra el umbral elegido
+    if (completionFilter === 'lt50') {
+      if (parseVal(r.target_completion) >= 0.5) return false;
+    } else if (parseFloat(completionFilter) > 0) {
+      if (parseVal(r.target_completion) < parseFloat(completionFilter)) return false;
+    }
     return true;
   });
 
@@ -908,20 +947,22 @@ function renderTargets() {
     return '<div class="stat"><div class="stat-over">'+s.label+'</div><div class="stat-val" style="color:'+s.color+';font-size:28px">'+s.val+'</div><div class="stat-foot">'+s.sub+'</div></div>';
   }).join('');
 
-  const months = [
-    {lbl:'Ene',tgt:'tgt_jan',cur:'cur_jan',pct:'pct_jan',g25:'gmv25_jan',yoy:'yoy_jan'},
-    {lbl:'Feb',tgt:'tgt_feb',cur:'cur_feb',pct:'pct_feb',g25:'gmv25_feb',yoy:'yoy_feb'},
-    {lbl:'Mar',tgt:'tgt_mar',cur:'cur_mar',pct:'pct_mar',g25:'gmv25_mar',yoy:'yoy_mar'},
-    {lbl:'Abr',tgt:'tgt_apr',cur:'cur_apr',pct:'pct_apr',g25:'gmv25_apr',yoy:'yoy_apr'},
-    {lbl:'May',tgt:'tgt_may',cur:'cur_may',pct:'pct_may',g25:'gmv25_may',yoy:'yoy_may'},
-    {lbl:'Jun',tgt:'tgt_jun',cur:'cur_jun',pct:'pct_jun',g25:'gmv25_jun',yoy:'yoy_jun'},
-    {lbl:'Jul',tgt:'tgt_jul',cur:'cur_jul',pct:'pct_jul',g25:'gmv25_jul',yoy:'yoy_jul'},
-    {lbl:'Ago',tgt:'tgt_aug',cur:'cur_aug',pct:'pct_aug',g25:'gmv25_aug',yoy:'yoy_aug'},
-    {lbl:'Sep',tgt:'tgt_sep',cur:'cur_sep',pct:'pct_sep',g25:'gmv25_sep',yoy:'yoy_sep'},
-    {lbl:'Oct',tgt:'tgt_oct',cur:'cur_oct',pct:'pct_oct',g25:'gmv25_oct',yoy:'yoy_oct'},
-    {lbl:'Nov',tgt:'tgt_nov',cur:'cur_nov',pct:'pct_nov',g25:'gmv25_nov',yoy:'yoy_nov'},
-    {lbl:'Dic',tgt:'tgt_dec',cur:'cur_dec',pct:'pct_dec',g25:'gmv25_dec',yoy:'yoy_dec'}
+  const allMonths = [
+    {lbl:'Ene',key:'jan',tgt:'tgt_jan',cur:'cur_jan',pct:'pct_jan',g25:'gmv25_jan',yoy:'yoy_jan'},
+    {lbl:'Feb',key:'feb',tgt:'tgt_feb',cur:'cur_feb',pct:'pct_feb',g25:'gmv25_feb',yoy:'yoy_feb'},
+    {lbl:'Mar',key:'mar',tgt:'tgt_mar',cur:'cur_mar',pct:'pct_mar',g25:'gmv25_mar',yoy:'yoy_mar'},
+    {lbl:'Abr',key:'apr',tgt:'tgt_apr',cur:'cur_apr',pct:'pct_apr',g25:'gmv25_apr',yoy:'yoy_apr'},
+    {lbl:'May',key:'may',tgt:'tgt_may',cur:'cur_may',pct:'pct_may',g25:'gmv25_may',yoy:'yoy_may'},
+    {lbl:'Jun',key:'jun',tgt:'tgt_jun',cur:'cur_jun',pct:'pct_jun',g25:'gmv25_jun',yoy:'yoy_jun'},
+    {lbl:'Jul',key:'jul',tgt:'tgt_jul',cur:'cur_jul',pct:'pct_jul',g25:'gmv25_jul',yoy:'yoy_jul'},
+    {lbl:'Ago',key:'aug',tgt:'tgt_aug',cur:'cur_aug',pct:'pct_aug',g25:'gmv25_aug',yoy:'yoy_aug'},
+    {lbl:'Sep',key:'sep',tgt:'tgt_sep',cur:'cur_sep',pct:'pct_sep',g25:'gmv25_sep',yoy:'yoy_sep'},
+    {lbl:'Oct',key:'oct',tgt:'tgt_oct',cur:'cur_oct',pct:'pct_oct',g25:'gmv25_oct',yoy:'yoy_oct'},
+    {lbl:'Nov',key:'nov',tgt:'tgt_nov',cur:'cur_nov',pct:'pct_nov',g25:'gmv25_nov',yoy:'yoy_nov'},
+    {lbl:'Dic',key:'dec',tgt:'tgt_dec',cur:'cur_dec',pct:'pct_dec',g25:'gmv25_dec',yoy:'yoy_dec'}
   ];
+  // Si eligieron un mes específico, solo dejamos ese en la lista; si no, se muestran los 12
+  const months = monthFilter === 'all' ? allMonths : allMonths.filter(function(m){ return m.key === monthFilter; });
 
   if (tgtSortCol) {
     merchants = merchants.slice().sort(function(a,b) {
