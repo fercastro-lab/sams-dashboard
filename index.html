@@ -192,6 +192,7 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
   <button class="tab-nav-btn active" onclick="switchTab('acr',this)"><i class="bi bi-activity"></i> Active Contact Rate</button>
   <button class="tab-nav-btn" onclick="switchTab('performance',this)"><i class="bi bi-graph-up"></i> Master Performance</button>
   <button class="tab-nav-btn" onclick="switchTab('targets',this)"><i class="bi bi-bullseye"></i> Target Performance</button>
+  <button class="tab-nav-btn" onclick="switchTab('detail',this)"><i class="bi bi-list-columns-reverse"></i> Merchant Detail</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -419,6 +420,49 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
 </div>
 </div>
 
+<!-- MERCHANT DETAIL TAB -->
+<div id="tab-detail" class="tab-content">
+<div class="main">
+
+  <div class="filters" style="margin-bottom:20px">
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-person"></i> Account Manager</span>
+      <select class="fsel" id="det-owner" onchange="renderMerchantDetail()">
+        <option value="all">Todos</option>
+        <option value="Delia Tellez">Delia Tellez</option>
+        <option value="Alex Martinez">Alex Martinez</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-star"></i> Top 20</span>
+      <select class="fsel" id="det-top20" onchange="renderMerchantDetail()">
+        <option value="all">Todos los merchants</option>
+        <option value="yes">Solo Top 20 (con LTV cohort)</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="search-wrap" style="max-width:220px">
+      <i class="bi bi-search"></i>
+      <input class="search" id="det-search" placeholder="Buscar merchant..." oninput="renderMerchantDetail()">
+    </div>
+  </div>
+
+  <div class="stats" style="margin-bottom:20px" id="det-stats"></div>
+
+  <div class="perf-section">
+    <div class="perf-header">
+      <div>
+        <div class="perf-title">Merchant Detail — GMV, CR, NPP%, DQ Rate (YTD 2026)</div>
+        <div class="perf-sub">Haz clic en un merchant del Top 20 para ver su LTV Cohort (ratio P12/P0)</div>
+      </div>
+    </div>
+    <div id="det-container"><div class="loading-box"><div class="spinner"></div><div class="loading-lbl">Cargando merchant detail...</div></div></div>
+  </div>
+
+</div>
+</div>
+
 <script>
 const API = "https://script.google.com/macros/s/AKfycbw9mG--q5ThCaF9UpREQlqAsgwGdBuxM96l0HKQh5G5tct-MQa9K5Rs8YHObhvPj5xE/exec";
 const PER_PAGE = 25;
@@ -448,6 +492,7 @@ function loadData() {
       window._merchantsData=(json.merchants||[]).map(normalizeRow);
       window._targetsData=(json.targets||[]).map(normalizeRow);
       window._merchantTargets=(json.merchant_targets||[]).map(normalizeRow);
+      window._merchantDetail=(json.merchant_detail||[]).map(normalizeRow);
       renderMerchants();
       buildFilters();
       applyFilters();
@@ -685,6 +730,7 @@ function switchTab(tab, el) {
   el.classList.add('active');
   if (tab === 'performance') renderPerformance();
   if (tab === 'targets') renderTargets();
+  if (tab === 'detail') renderMerchantDetail();
 }
 
 // ============================================
@@ -1042,6 +1088,92 @@ function tgtSort(col) {
     tgtSortDir = -1;
   }
   renderTargets();
+}
+
+// ============================================
+// MERCHANT DETAIL TAB
+// ============================================
+let detExpanded = null; // merchant_id actualmente expandido (o null)
+
+function renderMerchantDetail() {
+  const ownerFilter = document.getElementById('det-owner').value;
+  const top20Filter = document.getElementById('det-top20').value;
+  const search = document.getElementById('det-search').value.toLowerCase().trim();
+  const data = window._merchantDetail || [];
+
+  if (!data.length) {
+    document.getElementById('det-container').innerHTML = '<div class="empty-box"><div class="empty-icon"><i class="bi bi-exclamation-triangle"></i></div><div class="empty-lbl">Sin datos de Merchant Detail. Corre syncMerchantDetail() en Apps Script.</div></div>';
+    return;
+  }
+
+  const fmtM = v => { const n = parseFloat(v)||0; if(n===0) return '<span class="empty-cell">—</span>'; return '$'+(Math.abs(n)>=1000000?(Math.abs(n)/1000000).toFixed(1)+'M':Math.abs(n)>=1000?(Math.abs(n)/1000).toFixed(0)+'K':Math.abs(n).toFixed(0)); };
+  const fmtPct = v => { if(v===''||v===null||v===undefined||isNaN(parseFloat(v))) return '<span class="empty-cell">—</span>'; return (parseFloat(v)*100).toFixed(1)+'%'; };
+  const clsDq = v => { const n=parseFloat(v)*100; return n>=10?'pct-red':n>=7?'pct-yellow':'pct-green'; };
+  const clsCr = v => { const n=parseFloat(v)*100; return n>=30?'pct-green':n>=15?'pct-yellow':'pct-red'; };
+
+  let rows = data.filter(function(r) {
+    if (!r.merchant_id || r.merchant_id === 'merchant_id') return false;
+    if (ownerFilter !== 'all' && r.account_manager !== ownerFilter) return false;
+    if (top20Filter === 'yes' && r.is_top20 !== 'Sí') return false;
+    if (search && !(r.merchant_name||'').toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  const totalGmv = rows.reduce(function(s,r){return s+(parseFloat(r.gmv)||0);},0);
+  const avgCr = rows.length ? rows.reduce(function(s,r){return s+(parseFloat(r.cr)||0);},0)/rows.length : 0;
+  const avgNpp = rows.length ? rows.reduce(function(s,r){return s+(parseFloat(r.npp_pct)||0);},0)/rows.length : 0;
+
+  document.getElementById('det-stats').innerHTML = [
+    {label:'Merchants', val: rows.length, color:'var(--text1)', sub:'en filtro'},
+    {label:'GMV Total', val: fmtM(totalGmv), color:'var(--teal)', sub:'YTD 2026'},
+    {label:'CR Promedio', val: (avgCr*100).toFixed(1)+'%', color:'var(--green-d)', sub:'todos los canales'},
+    {label:'NPP% Promedio', val: (avgNpp*100).toFixed(1)+'%', color:'', sub:'sobre GMV'},
+  ].map(function(s){
+    return '<div class="stat"><div class="stat-over">'+s.label+'</div><div class="stat-val" style="color:'+s.color+';font-size:28px">'+s.val+'</div><div class="stat-foot">'+s.sub+'</div></div>';
+  }).join('');
+
+  // Ordenamos por GMV descendente (ya viene así de BigQuery, pero por si acaso)
+  rows = rows.slice().sort(function(a,b){ return (parseFloat(b.gmv)||0) - (parseFloat(a.gmv)||0); });
+
+  const thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:180px;z-index:2">Merchant</th>' +
+    '<th>Owner</th><th>GMV YTD</th><th>CR %</th><th>NPP %</th><th>DQ Rate</th><th>LTV Cohort (P12/P0)</th></tr>';
+
+  const bodyRows = rows.map(function(r) {
+    const owner = (r.account_manager||'').replace('Martinez','M.').replace('Tellez','T.');
+    const isTop20 = r.is_top20 === 'Sí';
+    const hasLtv = isTop20 && r.ltv_ratio_p12_p0 && parseFloat(r.ltv_ratio_p12_p0) > 0;
+    const ltvCell = hasLtv ? '<span class="pct-green" style="font-weight:800">'+parseFloat(r.ltv_ratio_p12_p0).toFixed(1)+'x</span>' : (isTop20 ? '<span class="empty-cell">calculando…</span>' : '<span class="empty-cell">— (solo Top 20)</span>');
+    const clickable = isTop20 ? ' style="cursor:pointer" onclick="toggleDetExpand(\''+r.merchant_id+'\')"' : '';
+    const expandIcon = isTop20 ? (detExpanded===r.merchant_id ? '<i class="bi bi-chevron-up" style="margin-right:6px;font-size:10px"></i>' : '<i class="bi bi-chevron-down" style="margin-right:6px;font-size:10px;opacity:.4"></i>') : '';
+
+    let rowHtml = '<tr'+clickable+'>' +
+      '<td style="position:sticky;left:0;background:var(--card);font-weight:700;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.merchant_name+'">'+expandIcon+r.merchant_name+'</td>' +
+      '<td><span class="badge-owner" style="font-size:10px;padding:2px 7px">'+owner+'</span></td>' +
+      '<td>'+fmtM(r.gmv)+'</td>' +
+      '<td><span class="'+clsCr(r.cr)+'">'+fmtPct(r.cr)+'</span></td>' +
+      '<td>'+fmtPct(r.npp_pct)+'</td>' +
+      '<td><span class="'+clsDq(r.dq_rate)+'">'+fmtPct(r.dq_rate)+'</span></td>' +
+      '<td>'+ltvCell+'</td>' +
+      '</tr>';
+
+    // Si este merchant está expandido, agregamos una fila extra con el detalle
+    if (detExpanded === r.merchant_id && hasLtv) {
+      rowHtml += '<tr><td colspan="7" style="background:var(--surface);padding:16px 20px">' +
+        '<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">' +
+        '<div><div class="stat-over">RATIO P12/P0</div><div style="font-size:26px;font-weight:800;color:var(--teal)">'+parseFloat(r.ltv_ratio_p12_p0).toFixed(2)+'x</div></div>' +
+        '<div style="flex:1;min-width:220px;font-size:12px;color:var(--text2)">Un cliente de <b>'+r.merchant_name+'</b> genera, en promedio, <b>'+parseFloat(r.ltv_ratio_p12_p0).toFixed(1)+'x</b> más GMV acumulado a los 12 meses de su primera compra que en su primer mes. Entre más alto, mejor retiene y crece este merchant a sus clientes.</div>' +
+        '</div></td></tr>';
+    }
+    return rowHtml;
+  }).join('');
+
+  document.getElementById('det-container').innerHTML =
+    '<div class="perf-table-wrap"><table class="perf-table"><thead>'+thead+'</thead><tbody>'+bodyRows+'</tbody></table></div>';
+}
+
+function toggleDetExpand(merchantId) {
+  detExpanded = detExpanded === merchantId ? null : merchantId;
+  renderMerchantDetail();
 }
 
 loadData();
