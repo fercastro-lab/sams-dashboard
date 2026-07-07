@@ -927,6 +927,10 @@ function renderTargets() {
   const search = document.getElementById('tgt-search').value.toLowerCase().trim();
   const monthFilter = document.getElementById('tgt-month').value;
   const completionFilter = document.getElementById('tgt-completion').value;
+  // Si hay un mes específico elegido, el % de cumplimiento se compara contra ESE mes (pct_jan, pct_feb, etc.)
+  // en vez del acumulado anual (target_completion). Así el filtro y la columna quedan alineados con el mes.
+  const compField = monthFilter === 'all' ? 'target_completion' : ('pct_' + monthFilter);
+  const compLabel = monthFilter === 'all' ? '% Cumpl' : ('% Cumpl ' + document.getElementById('tgt-month').selectedOptions[0].text);
   const rawTargets = window._merchantTargets || [];
 
   if (!rawTargets.length) {
@@ -969,11 +973,11 @@ function renderTargets() {
     if (ownerFilter !== 'all' && r.merchant_account_manager !== ownerFilter) return false;
     if (segFilter !== 'all' && r.merchant_segment !== segFilter) return false;
     if (search && !(r.merchant_name||'').toLowerCase().includes(search)) return false;
-    // Filtro % Cumplimiento: compara target_completion (viene como 0-1) contra el umbral elegido
+    // Filtro % Cumplimiento: compara el campo correcto (mensual o anual) contra el umbral elegido
     if (completionFilter === 'lt50') {
-      if (parseVal(r.target_completion) >= 0.5) return false;
+      if (parseVal(r[compField]) >= 0.5) return false;
     } else if (parseFloat(completionFilter) > 0) {
-      if (parseVal(r.target_completion) < parseFloat(completionFilter)) return false;
+      if (parseVal(r[compField]) < parseFloat(completionFilter)) return false;
     }
     return true;
   });
@@ -1049,7 +1053,7 @@ function renderTargets() {
     thSort('Peso','weight') +
     thSort('Target Anual','target_2026') +
     thSort('YTD Real','ytd_2026') +
-    thSort('% Cumpl','target_completion');
+    thSort(compLabel, compField);
   months.forEach(function(m) {
     thead += thSort(m.lbl+' Tgt', m.tgt) + thSort(m.lbl+' Real', m.cur) + thSort(m.lbl+' %', m.pct) + thSort(m.lbl+' 25', m.g25) + thSort('YoY '+m.lbl, m.yoy);
   });
@@ -1057,7 +1061,7 @@ function renderTargets() {
 
   const rows = merchants.slice(0,300).map(function(r) {
     const owner = (r.merchant_account_manager||'').replace('Martinez','M.').replace('Tellez','T.');
-    const pctVal = parseVal(r.target_completion)*100;
+    const pctVal = parseVal(r[compField])*100;
     const pctCls = clsPct(pctVal);
 
     let cells = '<td style="position:sticky;left:0;background:var(--card);z-index:1;font-weight:700;font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis" title="'+r.merchant_name+'">'+r.merchant_name+'</td>';
@@ -1066,7 +1070,7 @@ function renderTargets() {
     cells += '<td style="font-size:11px">'+r.weight+'</td>';
     cells += '<td>'+fmtM(parseVal(r.target_2026))+'</td>';
     cells += '<td>'+fmtM(parseVal(r.ytd_2026))+'</td>';
-    cells += '<td><span class="'+pctCls+'">'+fmtPct(r.target_completion)+'</span></td>';
+    cells += '<td><span class="'+pctCls+'">'+fmtPct(r[compField])+'</span></td>';
 
     months.forEach(function(m) {
       const tgt = r[m.tgt]||'';
@@ -1103,6 +1107,8 @@ function tgtSort(col) {
 // MERCHANT DETAIL TAB
 // ============================================
 let detExpanded = null; // merchant_id actualmente expandido (o null)
+let detSortCol = 'gmv';   // columna activa de ordenamiento
+let detSortDir = -1;      // -1 = mayor a menor, 1 = menor a mayor
 
 function renderMerchantDetail() {
   const ownerFilter = document.getElementById('det-owner').value;
@@ -1143,11 +1149,27 @@ function renderMerchantDetail() {
     return '<div class="stat"><div class="stat-over">'+s.label+'</div><div class="stat-val" style="color:'+s.color+';font-size:28px">'+s.val+'</div><div class="stat-foot">'+s.sub+'</div></div>';
   }).join('');
 
-  // Ordenamos por GMV descendente (ya viene así de BigQuery, pero por si acaso)
-  rows = rows.slice().sort(function(a,b){ return (parseFloat(b.gmv)||0) - (parseFloat(a.gmv)||0); });
+  // Ordenamos según la columna y dirección elegidas (por default: GMV de mayor a menor)
+  const textCols = ['merchant_name','account_manager','merchant_channel'];
+  rows = rows.slice().sort(function(a,b) {
+    let av = a[detSortCol]||'', bv = b[detSortCol]||'';
+    if (textCols.indexOf(detSortCol) === -1) {
+      av = parseFloat(av)||0; bv = parseFloat(bv)||0;
+      return (av - bv) * detSortDir;
+    }
+    return av < bv ? -detSortDir : av > bv ? detSortDir : 0;
+  });
 
-  const thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:180px;z-index:2">Merchant</th>' +
-    '<th>Owner</th><th>Canal</th><th>GMV YTD</th><th>CR %</th><th>NPP %</th><th>DQ Rate</th><th>LTV Cohort (P12/P0)</th></tr>';
+  function detThSort(label, col) {
+    const ic = detSortCol===col ? (detSortDir===1 ? '↑' : '↓') : '⇅';
+    const style = detSortCol===col ? 'color:var(--cyan);cursor:pointer' : 'cursor:pointer;opacity:.7';
+    return '<th onclick="detSort(\''+col+'\')" style="'+style+'">'+label+' <span style="font-size:9px">'+ic+'</span></th>';
+  }
+
+  const merchantIc = detSortCol==='merchant_name' ? (detSortDir===1?'↑':'↓') : '⇅';
+  const thead = '<tr><th style="text-align:left;position:sticky;left:0;min-width:180px;z-index:2;cursor:pointer" onclick="detSort(\'merchant_name\')">Merchant <span style="font-size:9px">'+merchantIc+'</span></th>' +
+    detThSort('Owner','account_manager') + detThSort('Canal','merchant_channel') + detThSort('GMV YTD','gmv') +
+    detThSort('CR %','cr') + detThSort('NPP %','npp_pct') + detThSort('DQ Rate','dq_rate') + detThSort('LTV Cohort (P12/P0)','ltv_ratio_p12_p0') + '</tr>';
 
   const bodyRows = rows.map(function(r) {
     const owner = (r.account_manager||'').replace('Martinez','M.').replace('Tellez','T.');
@@ -1186,6 +1208,16 @@ function renderMerchantDetail() {
 
 function toggleDetExpand(merchantId) {
   detExpanded = detExpanded === merchantId ? null : merchantId;
+  renderMerchantDetail();
+}
+
+function detSort(col) {
+  if (detSortCol === col) {
+    detSortDir = detSortDir === 1 ? -1 : 1;
+  } else {
+    detSortCol = col;
+    detSortDir = -1; // al cambiar de columna, arrancamos mayor a menor
+  }
   renderMerchantDetail();
 }
 
