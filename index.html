@@ -970,6 +970,16 @@ function renderTargets() {
     else n = (parseFloat(s)||0)*100;
     return n >= 90 ? 'pct-green' : n >= 70 ? 'pct-yellow' : 'pct-red';
   };
+  // Formatea el YoY: decimal (ej. 0.588) -> "+58.9%" con color, o "—" si no hay base 2025
+  const fmtYoy = function(v, g25) {
+    if (parseFloat(g25) <= 0 || !g25) return '<span class="empty-cell">—</span>';
+    const n = parseFloat(v);
+    if (isNaN(n)) return '<span class="empty-cell">—</span>';
+    const pctTxt = (n*100).toFixed(1)+'%';
+    const color = n >= 0 ? 'var(--green-d)' : 'var(--red-d)';
+    const sign = n > 0 ? '+' : '';
+    return '<span style="font-weight:600;color:'+color+'">'+sign+pctTxt+'</span>';
+  };
 
   let merchants = rawTargets.filter(function(r) {
     if (!r.merchant_id || r.merchant_id === 'merchant_id') return false;
@@ -1086,7 +1096,7 @@ function renderTargets() {
       cells += '<td style="font-size:11px">'+(parseVal(cur)>0?fmtM(parseVal(cur)):'<span class="empty-cell">—</span>')+'</td>';
       cells += '<td style="font-size:11px">'+(pct?'<span class="'+pctClass+'">'+fmtPct(pct)+'</span>':'<span class="empty-cell">—</span>')+'</td>';
       cells += '<td style="font-size:11px">'+(parseVal(g25)>0?fmtM(parseVal(g25)):'<span class="empty-cell">—</span>')+'</td>';
-      cells += '<td style="font-size:11px">'+(yoy?'<span style="font-weight:600">'+yoy+'</span>':'<span class="empty-cell">—</span>')+'</td>';
+      cells += '<td style="font-size:11px">'+fmtYoy(yoy, g25)+'</td>';
     });
 
     return '<tr>'+cells+'</tr>';
