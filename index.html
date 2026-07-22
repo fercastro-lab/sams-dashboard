@@ -6,6 +6,7 @@
 <title>SAMs · Active Contact Dashboard — Aplazo</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
   --cyan:#4AC9E3; --teal:#214345; --foam:#D6F5FA; --aqua:#18A8C0; --sea:#0C617A; --midnight:#0A2B2D;
@@ -190,6 +191,7 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
 
 <div class="tabs-nav">
   <button class="tab-nav-btn active" onclick="switchTab('acr',this)"><i class="bi bi-activity"></i> Active Contact Rate</button>
+  <button class="tab-nav-btn" onclick="switchTab('acr-daily',this)"><i class="bi bi-calendar2-week"></i> ACR por Día</button>
   <button class="tab-nav-btn" onclick="switchTab('performance',this)"><i class="bi bi-graph-up"></i> Master Performance</button>
   <button class="tab-nav-btn" onclick="switchTab('targets',this)"><i class="bi bi-bullseye"></i> Target Performance</button>
   <button class="tab-nav-btn" onclick="switchTab('detail',this)"><i class="bi bi-list-columns-reverse"></i> Merchant Detail</button>
@@ -294,6 +296,40 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
     </div>
     <div class="cal-grid" id="cal-grid"></div>
   </div>
+</div>
+</div>
+
+<!-- ACR POR DÍA TAB -->
+<div id="tab-acr-daily" class="tab-content">
+<div class="main">
+
+  <div class="filters" style="margin-bottom:20px">
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-calendar3"></i> Vista</span>
+      <div class="tab-btns" id="acrd-granularity">
+        <button class="tab-btn active" onclick="setAcrGranularity('day', this)">Día</button>
+        <button class="tab-btn" onclick="setAcrGranularity('month', this)">Mes</button>
+      </div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group" id="acrd-owners">
+      <span class="filter-label"><i class="bi bi-people"></i> Agentes</span>
+      <!-- los checkboxes de cada agente se generan solos con JS -->
+    </div>
+  </div>
+
+  <div class="table-card" style="padding:20px">
+    <div class="table-top" style="border-bottom:none;padding:0 0 12px 0">
+      <div>
+        <div class="table-ttl">Active Contact Rate por Día</div>
+        <div class="table-meta" id="acrd-meta">Evolución histórica por agente · fuente: Snapshot Diario</div>
+      </div>
+    </div>
+    <div style="position:relative;height:380px">
+      <canvas id="acrd-canvas"></canvas>
+    </div>
+  </div>
+
 </div>
 </div>
 
@@ -509,6 +545,7 @@ function loadData() {
       buildFilters();
       applyFilters();
       renderCalendar();
+      if (document.getElementById('tab-acr-daily').classList.contains('active')) renderAcrDaily();
       const now=new Date();
       document.getElementById("nav-update").textContent="Actualizado "+now.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
       toast("Datos actualizados",false);
@@ -743,6 +780,133 @@ function switchTab(tab, el) {
   if (tab === 'performance') renderPerformance();
   if (tab === 'targets') renderTargets();
   if (tab === 'detail') renderMerchantDetail();
+  if (tab === 'acr-daily') renderAcrDaily();
+}
+
+// ============================================
+// ACR POR DÍA — evolución del Active Contact Rate por agente
+// Fuente: hoja "Snapshot Diario" (una fila por holding por día)
+// ============================================
+let acrDailyChart = null;
+let acrGranularity = 'day';
+
+const AGENT_COLORS = {
+  'Alex Martinez':   '#4AC9E3',
+  'Delia Tellez':    '#214345',
+  'Emilio Saldivar': '#B07800'
+};
+
+// Convierte "21/7/2026" (formato es-MX que guarda Apps Script) en un Date real
+function parseSnapshotDate(fechaStr) {
+  const partes = (fechaStr || '').split('/').map(Number);
+  if (partes.length !== 3 || partes.some(isNaN)) return null;
+  const [dia, mes, anio] = partes;
+  return new Date(anio, mes - 1, dia);
+}
+
+// Agrupa el snapshot por día o por mes, y calcula el rate (%) por agente en cada bucket
+function buildAcrSeries(granularity) {
+  const owners = [...new Set(snapshot.map(r => r['Owner']).filter(Boolean))].sort();
+  const buckets = {};      // "2026-07-21" -> { "Alex Martinez": {yes:5, total:10}, ... }
+  const bucketDates = {};  // guarda el Date real de cada bucket para ordenar y formatear
+
+  snapshot.forEach(row => {
+    const owner = row['Owner'];
+    if (!owner) return;
+    const date = parseSnapshotDate(row['Fecha']);
+    if (!date || isNaN(date.getTime())) return;
+
+    const key = granularity === 'day'
+      ? date.toISOString().slice(0, 10)
+      : date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
+
+    if (!buckets[key]) { buckets[key] = {}; bucketDates[key] = date; }
+    if (!buckets[key][owner]) buckets[key][owner] = { yes: 0, total: 0 };
+    buckets[key][owner].total++;
+    if (row['Active Contact'] === 'Yes') buckets[key][owner].yes++;
+  });
+
+  const sortedKeys = Object.keys(buckets).sort();
+
+  const labels = sortedKeys.map(key => {
+    const d = bucketDates[key];
+    return granularity === 'day'
+      ? d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
+      : d.toLocaleDateString('es-MX', { month: 'short', year: 'numeric' });
+  });
+
+  const series = {};
+  owners.forEach(owner => {
+    series[owner] = sortedKeys.map(key => {
+      const b = buckets[key][owner];
+      if (!b || b.total === 0) return null; // sin dato ese día/mes → hueco, no un 0% falso
+      return +(b.yes / b.total * 100).toFixed(1);
+    });
+  });
+
+  return { labels, series, owners };
+}
+
+function setAcrGranularity(g, el) {
+  acrGranularity = g;
+  document.querySelectorAll('#acrd-granularity .tab-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderAcrDaily();
+}
+
+function renderAcrOwnerCheckboxes(owners) {
+  const container = document.getElementById('acrd-owners');
+  owners.forEach(owner => {
+    const id = 'acrd-chk-' + owner.replace(/\s+/g, '');
+    if (document.getElementById(id)) return; // ya existe, no lo dupliques
+    const label = document.createElement('label');
+    label.className = 'acrd-chk';
+    label.style = 'display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--text2);margin-left:10px;cursor:pointer';
+    label.innerHTML = `<input type="checkbox" id="${id}" checked onchange="renderAcrDaily()"> ${owner}`;
+    container.appendChild(label);
+  });
+}
+
+function renderAcrDaily() {
+  if (!snapshot.length) return;
+
+  const { labels, series, owners } = buildAcrSeries(acrGranularity);
+
+  if (!document.querySelector('#acrd-owners .acrd-chk')) {
+    renderAcrOwnerCheckboxes(owners);
+  }
+
+  const datasets = owners
+    .filter(owner => {
+      const chk = document.getElementById('acrd-chk-' + owner.replace(/\s+/g, ''));
+      return !chk || chk.checked;
+    })
+    .map(owner => ({
+      label: owner,
+      data: series[owner],
+      borderColor: AGENT_COLORS[owner] || '#8FA0AC',
+      backgroundColor: AGENT_COLORS[owner] || '#8FA0AC',
+      tension: 0.3,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      spanGaps: true
+    }));
+
+  const ctx = document.getElementById('acrd-canvas').getContext('2d');
+  if (acrDailyChart) acrDailyChart.destroy();
+  acrDailyChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { y: { suggestedMin: 0, suggestedMax: 100, ticks: { callback: v => v + '%' } } },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } }
+      }
+    }
+  });
 }
 
 // ============================================
