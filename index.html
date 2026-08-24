@@ -409,7 +409,7 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
     <div class="perf-header">
       <div>
         <div class="perf-title">Target Performance por Merchant — 2026</div>
-        <div class="perf-sub">Target, GMV Real, % Cumplimiento, GMV 2025 y YoY</div>
+        <div class="perf-sub" id="tgt-sub">Target, GMV Real, % Cumplimiento, GMV 2025 y YoY</div>
       </div>
     </div>
     <div id="tgt-container"><div class="loading-box"><div class="spinner"></div><div class="loading-lbl">Cargando targets...</div></div></div>
@@ -1216,8 +1216,32 @@ function renderTargets() {
     return '<span style="font-weight:600;color:'+color+'">'+sign+pctTxt+'</span>';
   };
 
-  let merchants = rawTargets.filter(function(r) {
-    if (!r.merchant_id || r.merchant_id === 'merchant_id') return false;
+  // ── Portería: la pertenencia al portafolio la manda BigQuery ──
+  // Portfolio Master trae solo merchants cuyo KAM actual es Delia, Alex o
+  // Emilio. Si un merchant cambió de KAM, no está en el índice y se cae de
+  // esta vista, aunque su fila siga viva en la pestaña Merchant Targets.
+  const pmIndex = {};
+  (window._portfolioMaster || []).forEach(function(p) {
+    if (p.merchant_id && p.merchant_id !== 'merchant_id') pmIndex[String(p.merchant_id).trim()] = p;
+  });
+  const pmActivo = Object.keys(pmIndex).length > 0;
+
+  let base = rawTargets.filter(function(r) { return r.merchant_id && r.merchant_id !== 'merchant_id'; });
+  let descartados = 0;
+  if (pmActivo) {
+    const antes = base.length;
+    base = base.filter(function(r) { return !!pmIndex[String(r.merchant_id).trim()]; })
+               .map(function(r) {
+                 // El AM también sale de BigQuery: si el sheet quedó viejo, manda BQ.
+                 const p = pmIndex[String(r.merchant_id).trim()];
+                 const copia = Object.assign({}, r);
+                 copia.merchant_account_manager = p.account_manager || r.merchant_account_manager;
+                 return copia;
+               });
+    descartados = antes - base.length;
+  }
+
+  let merchants = base.filter(function(r) {
     if (ownerFilter !== 'all' && r.merchant_account_manager !== ownerFilter) return false;
     if (segFilter !== 'all' && r.merchant_segment !== segFilter) return false;
     if (search && !(r.merchant_name||'').toLowerCase().includes(search)) return false;
@@ -1230,7 +1254,14 @@ function renderTargets() {
     return true;
   });
 
-  const segs = [...new Set(rawTargets.filter(function(r){return r.merchant_id&&r.merchant_id!=='merchant_id';}).map(function(r){return r.merchant_segment;}).filter(Boolean))].sort();
+  const segs = [...new Set(base.map(function(r){return r.merchant_segment;}).filter(Boolean))].sort();
+  const subEl = document.getElementById('tgt-sub');
+  if (subEl) {
+    subEl.textContent = pmActivo
+      ? 'Target, GMV Real, % Cumplimiento, GMV 2025 y YoY · ' + base.length + ' merchants vigentes según BigQuery' + (descartados > 0 ? ' · ' + descartados + ' filas viejas ocultas (cambiaron de KAM)' : '')
+      : 'Target, GMV Real, % Cumplimiento, GMV 2025 y YoY · ⚠️ Portfolio Master no cargó: mostrando la lista sin filtrar';
+  }
+
   const segSel = document.getElementById('tgt-segment');
   const curSeg = segSel.value;
   segSel.innerHTML = '<option value="all">Todos</option>';
