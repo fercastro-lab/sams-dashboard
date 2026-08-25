@@ -270,6 +270,9 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
     </div>
   </div>
 
+  <!-- ACR combinado Delia + Alex (excluye Emilio) — lo llena renderDuoAcr() -->
+  <div id="duo-acr" style="margin-bottom:18px"></div>
+
   <div class="owner-row" id="owner-row"></div>
 
   <div class="table-card">
@@ -667,8 +670,80 @@ function applyFilters() {
   });
   page=1;
   updateStats();
+  renderDuoAcr();
   renderOwnerCards();
   renderTable();
+}
+
+// ============================================
+// ACR COMBINADO — Delia Tellez + Alex Martinez (excluye Emilio Saldivar)
+// OJO: esta tarjeta se calcula sobre `raw` (portafolio completo), NO sobre
+// `filtered`. Es un KPI de referencia: no debe moverse cuando alguien juega
+// con los filtros de arriba. Si algún día quieres que sí responda a los
+// filtros, cambia `raw` por `filtered` en la línea del .filter().
+// ============================================
+const SAMS_CORE = ['Delia Tellez', 'Alex Martinez'];
+
+function acrDe(rows){
+  const total = rows.length;
+  const yes = rows.filter(h => h['Active Contact'] === 'Yes').length;
+  return { total: total, yes: yes, no: total - yes, rate: total > 0 ? (yes / total * 100) : 0 };
+}
+
+function renderDuoAcr(){
+  const cont = document.getElementById('duo-acr');
+  if(!cont) return;
+
+  // 1) Los holdings de cada SAM por separado
+  const porSam = SAMS_CORE.map(function(sam){
+    return { sam: sam, m: acrDe(raw.filter(h => h['Owner'] === sam)) };
+  });
+
+  // 2) Combinado (pooled): suma de Yes / suma de holdings.
+  //    Este es el número "real" del portafolio: pesa más quien tiene más holdings.
+  const combinado = acrDe(raw.filter(h => SAMS_CORE.indexOf(h['Owner']) !== -1));
+
+  if(combinado.total === 0){ cont.innerHTML = ''; return; }
+
+  // 3) Promedio simple: (ACR Delia + ACR Alex) / 2.
+  //    Trata a cada SAM igual sin importar tamaño de portafolio.
+  const conDatos = porSam.filter(function(p){ return p.m.total > 0; });
+  const promSimple = conDatos.length
+    ? conDatos.reduce(function(s,p){ return s + p.m.rate; }, 0) / conDatos.length
+    : 0;
+
+  const breakdown = porSam.map(function(p){
+    return `<div class="ostat">
+      <div class="ostat-val" style="color:var(--teal);font-size:18px">${p.m.total ? p.m.rate.toFixed(1) + '%' : '—'}</div>
+      <div class="ostat-lbl">${p.sam}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">${p.m.yes}/${p.m.total} holdings</div>
+    </div>`;
+  }).join('');
+
+  cont.innerHTML = `<div class="owner-card" style="border:1px solid var(--cyan)">
+    <div class="owner-head">
+      <div class="owner-avatar">DA</div>
+      <div>
+        <div class="owner-name">ACR combinado · Delia + Alex</div>
+        <div class="owner-sub">Excluye a Emilio Saldivar · sobre el portafolio completo (no le afectan los filtros de arriba)</div>
+      </div>
+    </div>
+    <div class="owner-stats">
+      <div class="ostat">
+        <div class="ostat-val" style="color:var(--teal)">${combinado.rate.toFixed(1)}%</div>
+        <div class="ostat-lbl">ACR combinado</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">${combinado.yes}/${combinado.total} holdings</div>
+      </div>
+      <div class="ostat">
+        <div class="ostat-val" style="color:var(--text1)">${promSimple.toFixed(1)}%</div>
+        <div class="ostat-lbl">Promedio simple</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">(Delia + Alex) / 2</div>
+      </div>
+      ${breakdown}
+    </div>
+    <div class="prog-track"><div class="prog-fill" style="width:${combinado.rate.toFixed(1)}%"></div></div>
+    <div class="prog-lbl"><span>${combinado.yes} con contacto activo</span><span>${combinado.no} sin contacto</span></div>
+  </div>`;
 }
 
 function setTab(t,el){tabFilter=t;document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');applyFilters();}
@@ -861,11 +936,19 @@ function switchTab(tab, el) {
 let acrDailyChart = null;
 let acrGranularity = 'day';
 
+const COMBO_LABEL = 'Delia + Alex (combinado)';
+
 const AGENT_COLORS = {
   'Alex Martinez':   '#4AC9E3',
   'Delia Tellez':    '#214345',
-  'Emilio Saldivar': '#B07800'
+  'Emilio Saldivar': '#B07800',
+  [COMBO_LABEL]:     '#E0447C'
 };
+
+// Los IDs de los checkboxes se arman quitando TODO lo que no sea letra o
+// número (antes solo se quitaban espacios; el label combinado trae "+" y
+// paréntesis y rompía el getElementById).
+function chkId(nombre){ return 'acrd-chk-' + nombre.replace(/[^A-Za-z0-9]/g, ''); }
 
 // Convierte "21/7/2026" (formato es-MX que guarda Apps Script) en un Date real
 function parseSnapshotDate(fechaStr) {
@@ -915,7 +998,20 @@ function buildAcrSeries(granularity) {
     });
   });
 
-  return { labels, series, owners };
+  // Serie extra: Delia + Alex juntos (pooled). Se suman Yes y totales de los
+  // dos ANTES de dividir, para que el rate sea el del portafolio conjunto.
+  series[COMBO_LABEL] = sortedKeys.map(key => {
+    let yes = 0, total = 0;
+    SAMS_CORE.forEach(sam => {
+      const b = buckets[key][sam];
+      if (b) { yes += b.yes; total += b.total; }
+    });
+    return total === 0 ? null : +(yes / total * 100).toFixed(1);
+  });
+  const tieneCombo = series[COMBO_LABEL].some(v => v !== null);
+  const ownersConCombo = tieneCombo ? owners.concat([COMBO_LABEL]) : owners;
+
+  return { labels, series, owners: ownersConCombo };
 }
 
 function setAcrGranularity(g, el) {
@@ -928,7 +1024,7 @@ function setAcrGranularity(g, el) {
 function renderAcrOwnerCheckboxes(owners) {
   const container = document.getElementById('acrd-owners');
   owners.forEach(owner => {
-    const id = 'acrd-chk-' + owner.replace(/\s+/g, '');
+    const id = chkId(owner);
     if (document.getElementById(id)) return; // ya existe, no lo dupliques
     const label = document.createElement('label');
     label.className = 'acrd-chk';
@@ -949,7 +1045,7 @@ function renderAcrDaily() {
 
   const datasets = owners
     .filter(owner => {
-      const chk = document.getElementById('acrd-chk-' + owner.replace(/\s+/g, ''));
+      const chk = document.getElementById(chkId(owner));
       return !chk || chk.checked;
     })
     .map(owner => ({
@@ -957,6 +1053,10 @@ function renderAcrDaily() {
       data: series[owner],
       borderColor: AGENT_COLORS[owner] || '#8FA0AC',
       backgroundColor: AGENT_COLORS[owner] || '#8FA0AC',
+      // la línea combinada va punteada y más gruesa para no confundirla
+      // con la de un agente individual
+      borderDash: owner === COMBO_LABEL ? [6, 4] : [],
+      borderWidth: owner === COMBO_LABEL ? 3 : 2,
       tension: 0.3,
       pointRadius: 4,
       pointHoverRadius: 6,
