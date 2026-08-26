@@ -400,6 +400,16 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
       </select>
     </div>
     <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-patch-check"></i> Vigencia</span>
+      <select class="fsel" id="tgt-vigencia" onchange="renderTargets()">
+        <option value="all">Todos</option>
+        <option value="vigentes">Solo vigentes</option>
+        <option value="ex">Solo ex-portafolio</option>
+        <option value="nuevos">Solo nuevos</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
     <div class="search-wrap" style="max-width:220px">
       <i class="bi bi-search"></i>
       <input class="search" id="tgt-search" placeholder="Buscar merchant..." oninput="renderTargets()">
@@ -1337,32 +1347,49 @@ function renderTargets() {
     return '<span style="font-weight:600;color:'+color+'">'+sign+pctTxt+'</span>';
   };
 
-  // ── Portería: la pertenencia al portafolio la manda BigQuery ──
-  // Portfolio Master trae solo merchants cuyo KAM actual es Delia, Alex o
-  // Emilio. Si un merchant cambió de KAM, no está en el índice y se cae de
-  // esta vista, aunque su fila siga viva en la pestaña Merchant Targets.
+  // ── Vigencia: la vista es una UNIÓN, no una intersección ──
+  // Antes esta vista descartaba toda fila que no estuviera en Portfolio
+  // Master, lo que borraba el histórico de H1 de los merchants que cambiaron
+  // de KAM. Ahora se quedan visibles y etiquetados:
+  //   Vigente       → hoy es de Delia/Alex/Emilio según BigQuery
+  //   Ex-portafolio → tiene histórico de H1 pero ya cambió de KAM
+  //   Nuevo         → entró al portafolio, sin histórico de H1
+  // La etiqueta la escribe el Apps Script en la columna `vigencia`. Si el
+  // sheet todavía no la tiene, la derivamos aquí contra Portfolio Master
+  // para que el dashboard no dependa de que ya corriste el script.
   const pmIndex = {};
   (window._portfolioMaster || []).forEach(function(p) {
     if (p.merchant_id && p.merchant_id !== 'merchant_id') pmIndex[String(p.merchant_id).trim()] = p;
   });
   const pmActivo = Object.keys(pmIndex).length > 0;
 
-  let base = rawTargets.filter(function(r) { return r.merchant_id && r.merchant_id !== 'merchant_id'; });
-  let descartados = 0;
-  if (pmActivo) {
-    const antes = base.length;
-    base = base.filter(function(r) { return !!pmIndex[String(r.merchant_id).trim()]; })
-               .map(function(r) {
-                 // El AM también sale de BigQuery: si el sheet quedó viejo, manda BQ.
-                 const p = pmIndex[String(r.merchant_id).trim()];
-                 const copia = Object.assign({}, r);
-                 copia.merchant_account_manager = p.account_manager || r.merchant_account_manager;
-                 return copia;
-               });
-    descartados = antes - base.length;
+  function vigenciaDe(r) {
+    if (r.vigencia) return r.vigencia;                    // la manda el sheet
+    if (!pmActivo) return 'Vigente';                      // sin roster: no juzgamos
+    return pmIndex[String(r.merchant_id).trim()] ? 'Vigente' : 'Ex-portafolio';
   }
 
+  let base = rawTargets
+    .filter(function(r) { return r.merchant_id && r.merchant_id !== 'merchant_id'; })
+    .map(function(r) {
+      const copia = Object.assign({}, r);
+      copia._vig = vigenciaDe(r);
+      // El AM de BigQuery manda solo para los vigentes. Al ex-portafolio le
+      // dejamos su AM histórico: es justo el dato que quieres ver ahí.
+      const p = pmIndex[String(r.merchant_id).trim()];
+      if (p && p.account_manager) copia.merchant_account_manager = p.account_manager;
+      return copia;
+    });
+
+  const conteoVig = { Vigente: 0, 'Ex-portafolio': 0, Nuevo: 0 };
+  base.forEach(function(r) { if (conteoVig[r._vig] !== undefined) conteoVig[r._vig]++; });
+
+  const vigFilter = document.getElementById('tgt-vigencia').value;
+
   let merchants = base.filter(function(r) {
+    if (vigFilter === 'vigentes' && r._vig !== 'Vigente') return false;
+    if (vigFilter === 'ex' && r._vig !== 'Ex-portafolio') return false;
+    if (vigFilter === 'nuevos' && r._vig !== 'Nuevo') return false;
     if (ownerFilter !== 'all' && r.merchant_account_manager !== ownerFilter) return false;
     if (segFilter !== 'all' && r.merchant_segment !== segFilter) return false;
     if (search && !(r.merchant_name||'').toLowerCase().includes(search)) return false;
@@ -1379,8 +1406,11 @@ function renderTargets() {
   const subEl = document.getElementById('tgt-sub');
   if (subEl) {
     subEl.textContent = pmActivo
-      ? 'Target, GMV Real, % Cumplimiento, GMV 2025 y YoY · ' + base.length + ' merchants vigentes según BigQuery' + (descartados > 0 ? ' · ' + descartados + ' filas viejas ocultas (cambiaron de KAM)' : '')
-      : 'Target, GMV Real, % Cumplimiento, GMV 2025 y YoY · ⚠️ Portfolio Master no cargó: mostrando la lista sin filtrar';
+      ? 'H1 congelado del histórico · H2 desde targets_actuales · ' +
+        conteoVig['Vigente'] + ' vigentes, ' +
+        conteoVig['Ex-portafolio'] + ' ex-portafolio, ' +
+        conteoVig['Nuevo'] + ' nuevos · totales: H1 suma todos, H2 solo vigentes'
+      : '⚠️ Portfolio Master no cargó: no puedo distinguir vigentes de ex-portafolio';
   }
 
   const segSel = document.getElementById('tgt-segment');
@@ -1393,15 +1423,40 @@ function renderTargets() {
     segSel.appendChild(op);
   });
 
-  const totalTarget = merchants.reduce(function(s,r){return s+parseVal(r.target_2026);},0);
-  const totalYTD = merchants.reduce(function(s,r){return s+parseVal(r.ytd_2026);},0);
+  // ── Totales: la regla acordada ──
+  // H1 (ene–jun): suman TODOS, incluidos los ex-portafolio. Su resultado de
+  //   H1 sí fue parte del target de tus agentes ese semestre.
+  // H2 (jul–dic): suman SOLO los vigentes. Si un merchant se fue en agosto y
+  //   sigue vendiendo con otro KAM, ese GMV no es logro de tu agente.
+  const MESES_H1 = ['jan','feb','mar','apr','may','jun'];
+  const MESES_H2 = ['jul','aug','sep','oct','nov','dec'];
+  const sumaMeses = function(rows, meses, campo) {
+    return rows.reduce(function(acc, r) {
+      return acc + meses.reduce(function(a, m) { return a + parseVal(r[campo + '_' + m]); }, 0);
+    }, 0);
+  };
+
+  const vigentes = merchants.filter(function(r) { return r._vig !== 'Ex-portafolio'; });
+
+  const targetH1 = sumaMeses(merchants, MESES_H1, 'tgt');
+  const targetH2 = sumaMeses(vigentes,  MESES_H2, 'tgt');
+  const totalTarget = targetH1 + targetH2;
+
+  const ytdH1 = sumaMeses(merchants, MESES_H1, 'cur');
+  const ytdH2 = sumaMeses(vigentes,  MESES_H2, 'cur');
+  const totalYTD = ytdH1 + ytdH2;
+
   const totalCompletion = totalTarget>0?totalYTD/totalTarget*100:0;
+  const exCount = merchants.length - vigentes.length;
 
   document.getElementById('tgt-stats').innerHTML = [
-    {label:'Merchants',val:merchants.length,color:'var(--text1)',sub:'en filtro'},
-    {label:'Target Anual',val:fmtM(totalTarget),color:'var(--teal)',sub:'2026 total'},
-    {label:'GMV Real YTD',val:fmtM(totalYTD),color:'var(--green-d)',sub:'acumulado'},
-    {label:'% Cumplimiento',val:'<span class="'+clsPct(totalCompletion)+'">'+totalCompletion.toFixed(1)+'%</span>',color:'',sub:'vs target anual'},
+    {label:'Merchants',val:merchants.length,color:'var(--text1)',
+     sub: exCount>0 ? exCount+' ex-portafolio incluidos' : 'en filtro'},
+    {label:'Target Anual',val:fmtM(totalTarget),color:'var(--teal)',
+     sub:'H1 '+fmtM(targetH1).replace(/<[^>]*>/g,'')+' + H2 '+fmtM(targetH2).replace(/<[^>]*>/g,'')},
+    {label:'GMV Real YTD',val:fmtM(totalYTD),color:'var(--green-d)',
+     sub:'H1 '+fmtM(ytdH1).replace(/<[^>]*>/g,'')+' + H2 '+fmtM(ytdH2).replace(/<[^>]*>/g,'')},
+    {label:'% Cumplimiento',val:'<span class="'+clsPct(totalCompletion)+'">'+totalCompletion.toFixed(1)+'%</span>',color:'',sub:'H1 todos · H2 vigentes'},
   ].map(function(s){
     return '<div class="stat"><div class="stat-over">'+s.label+'</div><div class="stat-val" style="color:'+s.color+';font-size:28px">'+s.val+'</div><div class="stat-foot">'+s.sub+'</div></div>';
   }).join('');
@@ -1449,6 +1504,7 @@ function renderTargets() {
   const merchantSortIc = tgtSortCol==='merchant_name' ? (tgtSortDir===1?'↑':'↓') : '⇅';
   let thead = `<tr><th style="text-align:left;position:sticky;left:0;min-width:150px;z-index:2;cursor:pointer" onclick="tgtSort('merchant_name')">Merchant <span style="font-size:9px">${merchantSortIc}</span></th>` +
     thSort('Owner','merchant_account_manager') +
+    thSort('Vigencia','_vig') +
     thSort('Segmento','merchant_segment') +
     thSort('Peso','weight') +
     thSort('Target Anual','target_2026') +
@@ -1466,6 +1522,21 @@ function renderTargets() {
 
     let cells = '<td style="position:sticky;left:0;background:var(--card);z-index:1;font-weight:700;font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis" title="'+r.merchant_name+'">'+r.merchant_name+'</td>';
     cells += '<td><span class="badge-owner" style="font-size:10px;padding:2px 7px">'+owner+'</span></td>';
+    // Badge de vigencia: el ex-portafolio se ve de inmediato para que nadie
+    // lea su H2 vacío como un incumplimiento.
+    const vigStyles = {
+      'Vigente':       'background:rgba(0,150,90,.12);color:var(--green-d)',
+      'Ex-portafolio': 'background:rgba(190,60,60,.12);color:var(--red-d)',
+      'Nuevo':         'background:rgba(74,201,227,.18);color:var(--teal)'
+    };
+    const vigTitle = {
+      'Vigente':       'En el portafolio de tus agentes según BigQuery',
+      'Ex-portafolio': 'Ya cambió de KAM · se conserva su histórico de H1, no suma en H2',
+      'Nuevo':         'Entró al portafolio · sin histórico de H1'
+    };
+    cells += '<td><span class="badge-owner" style="font-size:10px;padding:2px 7px;'+
+             (vigStyles[r._vig]||'')+'" title="'+(vigTitle[r._vig]||'')+'">'+
+             (r._vig==='Ex-portafolio'?'Ex':r._vig)+'</span></td>';
     cells += '<td style="font-size:11px">'+r.merchant_segment+'</td>';
     cells += '<td style="font-size:11px">'+r.weight+'</td>';
     cells += '<td>'+fmtM(parseVal(r.target_2026))+'</td>';
