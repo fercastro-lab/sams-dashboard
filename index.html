@@ -693,6 +693,16 @@ function applyFilters() {
 const SAMS_TODOS = ['Alex Martinez', 'Delia Tellez', 'Emilio Saldivar'];
 const SAMS_BPO   = ['Delia Tellez', 'Alex Martinez'];
 
+// Normaliza nombres para comparar: quita acentos, pasa a minúsculas y
+// colapsa espacios. Así "Delia Téllez", "delia  tellez" y "Delia Tellez"
+// se leen como el mismo agente. El nombre viene de HubSpot (firstName +
+// lastName) y no siempre está capturado igual.
+function norm(v){
+  return String(v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 // ACR de un conjunto de holdings: Yes / total
 function acrDe(rows){
   const total = rows.length;
@@ -701,14 +711,39 @@ function acrDe(rows){
 }
 
 // Promedio simple del ACR de una lista de agentes.
-// Los agentes que no tienen ningún holding en la vista actual se ignoran
-// (no cuentan como 0%, porque eso hundiría el promedio falsamente).
+// Devuelve además el diagnóstico para saber POR QUÉ faltó alguien:
+//   - ausentes: el agente no existe en TODO el sheet → nombre mal escrito
+//     en HubSpot o holding sin owner. Esto es un problema de datos.
+//   - filtrados: el agente sí existe pero los filtros lo dejaron fuera.
+//     Esto es normal y esperado.
 function promedioSimple(agentes){
-  const rates = agentes
-    .map(a => acrDe(filtered.filter(h => h['Owner'] === a)).rate)
-    .filter(r => r !== null);
-  if(!rates.length) return { rate: null, n: 0 };
-  return { rate: rates.reduce((a,b) => a + b, 0) / rates.length, n: rates.length };
+  const detalle = agentes.map(function(a){
+    return {
+      agente: a,
+      vista: acrDe(filtered.filter(h => norm(h['Owner']) === norm(a))),
+      existe: raw.some(h => norm(h['Owner']) === norm(a))
+    };
+  });
+
+  const rates     = detalle.filter(d => d.vista.rate !== null).map(d => d.vista.rate);
+  const ausentes  = detalle.filter(d => !d.existe).map(d => d.agente);
+  const filtrados = detalle.filter(d => d.existe && d.vista.rate === null).map(d => d.agente);
+
+  return {
+    rate: rates.length ? rates.reduce((a,b) => a + b, 0) / rates.length : null,
+    n: rates.length,
+    esperados: agentes.length,
+    ausentes: ausentes,
+    filtrados: filtrados
+  };
+}
+
+// Texto del pie de cada tarjeta: si todo está bien dice la fórmula;
+// si falta alguien, dice quién y por qué.
+function pieRate(r, textoOk){
+  if (r.ausentes.length) return '⚠️ no encuentro a ' + r.ausentes.join(' ni ') + ' en Owner';
+  if (r.filtrados.length) return r.n + ' de ' + r.esperados + ' · filtro excluye a ' + r.filtrados.join(', ');
+  return textoOk;
 }
 
 function setTab(t,el){tabFilter=t;document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');applyFilters();}
@@ -726,11 +761,17 @@ function updateStats(){
   document.getElementById('s-yes').textContent=yes;
   document.getElementById('s-no').textContent=no;
   document.getElementById('s-rate').textContent=pct(rTotal);
-  document.getElementById('s-rate-foot').textContent=
-    rTotal.n === 3 ? 'promedio de los 3 agentes' : 'promedio de ' + rTotal.n + ' agente(s) en vista';
+  document.getElementById('s-rate-foot').textContent=pieRate(rTotal, 'promedio de los 3 agentes');
   document.getElementById('s-rate-bpo').textContent=pct(rBpo);
-  document.getElementById('s-rate-bpo-foot').textContent=
-    rBpo.n === 2 ? 'Delia + Alex (sin Emilio)' : rBpo.n + ' de 2 agentes en vista';
+  document.getElementById('s-rate-bpo-foot').textContent=pieRate(rBpo, 'promedio de Delia + Alex');
+
+  // Diagnóstico en consola (F12) cuando un agente esperado no aparece:
+  // imprime los valores REALES de la columna Owner para poder compararlos.
+  if (rTotal.ausentes.length) {
+    console.warn('Agentes no encontrados en la columna Owner:', rTotal.ausentes);
+    console.warn('Valores reales de Owner en el sheet:',
+      [...new Set(raw.map(h => h['Owner']))].sort());
+  }
   document.getElementById('s-yes-pct').textContent=total>0?Math.round(yes/total*100)+'%':'0%';
   document.getElementById('s-no-pct').textContent=total>0?Math.round(no/total*100)+'%':'0%';
   document.getElementById('tbl-meta').textContent=`${total} holdings · de ${raw.length} totales`;
@@ -979,7 +1020,10 @@ function buildAcrSeries(granularity) {
   // y luego se promedian, para que la línea y el KPI cuadren.
   series[COMBO_LABEL] = sortedKeys.map(key => {
     const rates = SAMS_BPO
-      .map(sam => buckets[key][sam])
+      .map(sam => {
+        const real = Object.keys(buckets[key]).find(o => norm(o) === norm(sam));
+        return real ? buckets[key][real] : null;
+      })
       .filter(b => b && b.total > 0)
       .map(b => b.yes / b.total * 100);
     if (!rates.length) return null;
