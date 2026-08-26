@@ -1156,13 +1156,32 @@ function renderPerformance() {
     };
   }
 
+  const manager = view === 'all' ? 'all' : view;
+
+  // La pestaña `Targets` ahora trae una fila por mes POR AM, más una fila
+  // "all" con el total del equipo. Antes solo tenía el total, y esta función
+  // lo devolvía sin importar qué agente estuviera seleccionado: comparaba el
+  // GMV de una persona contra el target de las tres.
+  //
+  // `tieneDesgloseAm` mantiene la compatibilidad: si el sheet todavía es el
+  // viejo (sin columna account_manager), se comporta como antes en vez de
+  // devolver ceros.
+  const tieneDesgloseAm = targets.some(r => r.account_manager);
+
   function getTarget(month) {
-    const t = targets.find(r => r.mes === month);
+    if (!tieneDesgloseAm) {
+      const t = targets.find(r => r.mes === month);
+      return t ? parseFloat(t.gmv_target) || 0 : 0;
+    }
+    const t = targets.find(r => r.mes === month && r.account_manager === manager);
     return t ? parseFloat(t.gmv_target) || 0 : 0;
   }
 
-  const manager = view === 'all' ? 'all' : view;
-  document.getElementById('perf-title').textContent = (view === 'all' ? 'SAMs' : view) + ' — Performance 2026';
+  // Aviso visible cuando se está viendo un AM pero el target es del equipo:
+  // así nadie lee un % de cumplimiento que no significa lo que parece.
+  const targetDesalineado = !tieneDesgloseAm && manager !== 'all';
+  document.getElementById('perf-title').textContent = (view === 'all' ? 'SAMs' : view) + ' — Performance 2026' +
+    (targetDesalineado ? '  ⚠️ el GMV Target mostrado es del equipo completo, no de este agente' : '');
 
   const metrics = [
     {key:'gmv', label:'Total GMV', fmt:'money', section:true},
