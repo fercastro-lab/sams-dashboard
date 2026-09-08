@@ -335,7 +335,7 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
   <div class="table-card" style="padding:20px">
     <div class="table-top" style="border-bottom:none;padding:0 0 12px 0">
       <div>
-        <div class="table-ttl">Active Contact Rate por Día</div>
+        <div class="table-ttl" id="acrd-ttl">Active Contact Rate por Día</div>
         <div class="table-meta" id="acrd-meta">Evolución histórica por agente · fuente: Snapshot Diario</div>
       </div>
     </div>
@@ -977,72 +977,181 @@ const AGENT_COLORS = {
 // paréntesis y rompía el getElementById).
 function chkId(nombre){ return 'acrd-chk-' + nombre.replace(/[^A-Za-z0-9]/g, ''); }
 
-// Convierte "21/7/2026" (formato es-MX que guarda Apps Script) en un Date real
+// ============================================
+// LECTURA DE FECHAS DEL SNAPSHOT
+//
+// La columna "Fecha" de Snapshot Diario NO siempre llega en el mismo formato,
+// y ese era el bug de septiembre:
+//
+//   Apps Script escribe el texto "7/9/2026" (d/m/yyyy).
+//   Si la celda no está formateada como texto, Sheets lo re-interpreta y lo
+//   guarda como FECHA REAL. Entonces doGet() la manda en ISO
+//   ("2026-09-07T06:00:00.000Z"), el split('/') no encuentra diagonales y la
+//   fila se descartaba en silencio.
+//
+//   Por qué pegó justo en septiembre: los días 1 al 12 son ambiguos (7/9
+//   puede leerse como 7-sep o como 9-jul), así que Sheets los convierte a
+//   fecha. Los días 13+ son imposibles como mes, se quedan como texto y sí
+//   se graficaban. Septiembre solo tiene días 1–7 hasta hoy → mes completo
+//   invisible.
+//
+// Solución: aceptar los tres formatos posibles.
+// ============================================
 function parseSnapshotDate(fechaStr) {
-  const partes = (fechaStr || '').split('/').map(Number);
-  if (partes.length !== 3 || partes.some(isNaN)) return null;
-  const [dia, mes, anio] = partes;
-  return new Date(anio, mes - 1, dia);
+  const s = String(fechaStr == null ? '' : fechaStr).trim();
+  if (!s) return null;
+
+  // Caso 1 — ISO ("2026-09-07" o "2026-09-07T06:00:00.000Z").
+  // Cortamos año/mes/día a mano en vez de usar new Date(s), porque
+  // new Date("2026-09-07T06:00:00Z") depende de la zona horaria del
+  // navegador y puede caer un día antes o después.
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
+
+  // Caso 2 — texto d/m/yyyy o d-m-yyyy (lo que escribe toLocaleDateString es-MX)
+  const p = s.split(/[\/\-.]/).map(Number);
+  if (p.length === 3 && !p.some(isNaN)) {
+    const dia = p[0], mes = p[1], anio = p[2];
+    if (anio > 1900 && mes >= 1 && mes <= 12) return new Date(anio, mes - 1, dia);
+  }
+
+  // Caso 3 — último recurso: que lo intente el navegador.
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
 }
 
-// Agrupa el snapshot por día o por mes, y calcula el rate (%) por agente en cada bucket
+// Llaves de agrupación. Se construyen con getFullYear/getMonth/getDate
+// (hora LOCAL), no con toISOString(), que corría el día si abres el
+// dashboard desde una zona horaria distinta a la de México.
+function keyDia(d) {
+  return d.getFullYear() + '-' +
+         String(d.getMonth() + 1).padStart(2, '0') + '-' +
+         String(d.getDate()).padStart(2, '0');
+}
+function keyMes(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+// ============================================
+// SERIES DEL GRÁFICO
+//
+// Siempre se agrupa PRIMERO por día. La vista de mes es el promedio de los
+// rates diarios de ese mes, no un pooled (Yes totales / filas totales).
+// Dos razones:
+//   1. Es la misma fórmula que la tarjeta de KPI de arriba → los números cuadran.
+//   2. Un mes incompleto (septiembre) ya trae su promedio con los días que
+//      existen, y un día con más holdings que otro no lo jala de más.
+// ============================================
 function buildAcrSeries(granularity) {
   const owners = [...new Set(snapshot.map(r => r['Owner']).filter(Boolean))].sort();
-  const buckets = {};      // "2026-07-21" -> { "Alex Martinez": {yes:5, total:10}, ... }
-  const bucketDates = {};  // guarda el Date real de cada bucket para ordenar y formatear
+
+  const dias = {};        // "2026-09-07" -> { "Alex Martinez": {yes, total}, ... }
+  const diasFecha = {};   // guarda el Date real de cada día
+  let descartadas = 0;    // filas con fecha ilegible → se reportan en el subtítulo
 
   snapshot.forEach(row => {
     const owner = row['Owner'];
     if (!owner) return;
     const date = parseSnapshotDate(row['Fecha']);
-    if (!date || isNaN(date.getTime())) return;
+    if (!date || isNaN(date.getTime())) { descartadas++; return; }
 
-    const key = granularity === 'day'
-      ? date.toISOString().slice(0, 10)
-      : date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
-
-    if (!buckets[key]) { buckets[key] = {}; bucketDates[key] = date; }
-    if (!buckets[key][owner]) buckets[key][owner] = { yes: 0, total: 0 };
-    buckets[key][owner].total++;
-    if (row['Active Contact'] === 'Yes') buckets[key][owner].yes++;
+    const k = keyDia(date);
+    if (!dias[k]) { dias[k] = {}; diasFecha[k] = date; }
+    if (!dias[k][owner]) dias[k][owner] = { yes: 0, total: 0 };
+    dias[k][owner].total++;
+    if (row['Active Contact'] === 'Yes') dias[k][owner].yes++;
   });
 
-  const sortedKeys = Object.keys(buckets).sort();
+  // Rate de un agente en un día concreto (null = ese día no tiene snapshot suyo)
+  function rateDia(k, owner) {
+    const b = dias[k] && dias[k][owner];
+    return (b && b.total > 0) ? (b.yes / b.total * 100) : null;
+  }
 
-  const labels = sortedKeys.map(key => {
-    const d = bucketDates[key];
-    return granularity === 'day'
-      ? d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
-      : d.toLocaleDateString('es-MX', { month: 'short', year: 'numeric' });
-  });
-
-  const series = {};
-  owners.forEach(owner => {
-    series[owner] = sortedKeys.map(key => {
-      const b = buckets[key][owner];
-      if (!b || b.total === 0) return null; // sin dato ese día/mes → hueco, no un 0% falso
-      return +(b.yes / b.total * 100).toFixed(1);
-    });
-  });
-
-  // Serie extra: Contact Rate BPO = promedio simple de Delia y Alex.
-  // Misma fórmula que la tarjeta de arriba: se saca el rate de cada una
-  // y luego se promedian, para que la línea y el KPI cuadren.
-  series[COMBO_LABEL] = sortedKeys.map(key => {
+  // Contact Rate BPO = promedio simple de Delia y Alex ese día
+  function rateComboDia(k) {
     const rates = SAMS_BPO
       .map(sam => {
-        const real = Object.keys(buckets[key]).find(o => norm(o) === norm(sam));
-        return real ? buckets[key][real] : null;
+        const real = Object.keys(dias[k] || {}).find(o => norm(o) === norm(sam));
+        return real ? rateDia(k, real) : null;
       })
-      .filter(b => b && b.total > 0)
-      .map(b => b.yes / b.total * 100);
+      .filter(v => v !== null);
     if (!rates.length) return null;
-    return +(rates.reduce((a, b) => a + b, 0) / rates.length).toFixed(1);
-  });
-  const tieneCombo = series[COMBO_LABEL].some(v => v !== null);
-  const ownersConCombo = tieneCombo ? owners.concat([COMBO_LABEL]) : owners;
+    return rates.reduce((a, b) => a + b, 0) / rates.length;
+  }
 
-  return { labels, series, owners: ownersConCombo };
+  function valorDe(nombre, k) {
+    return nombre === COMBO_LABEL ? rateComboDia(k) : rateDia(k, nombre);
+  }
+
+  const diasOrdenados = Object.keys(dias).sort();
+  const nombres = owners.concat([COMBO_LABEL]);
+
+  const series = {};
+  const diasPorBucket = {};   // cuántos días alimentan cada punto
+  let labels = [];
+  let keys = [];
+  let mesParcial = null;      // info del mes en curso, para el subtítulo
+
+  if (granularity === 'day') {
+    keys = diasOrdenados;
+    labels = keys.map(k => diasFecha[k].toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }));
+    keys.forEach(k => { diasPorBucket[k] = 1; });
+    nombres.forEach(n => {
+      series[n] = keys.map(k => {
+        const v = valorDe(n, k);
+        return v === null ? null : +v.toFixed(1);
+      });
+    });
+
+  } else {
+    // Agrupamos los días por mes
+    const porMes = {};
+    diasOrdenados.forEach(k => {
+      const m = k.slice(0, 7);
+      if (!porMes[m]) porMes[m] = [];
+      porMes[m].push(k);
+    });
+
+    keys = Object.keys(porMes).sort();
+    const mesActual = keyMes(new Date());
+
+    labels = keys.map(m => {
+      const d = diasFecha[porMes[m][0]];
+      const txt = d.toLocaleDateString('es-MX', { month: 'short', year: 'numeric' });
+      // El mes en curso se marca con * y se explica en el subtítulo, en vez
+      // de esconderse: un promedio parcial es información, no un error.
+      return m === mesActual ? txt + ' *' : txt;
+    });
+
+    keys.forEach(m => { diasPorBucket[m] = porMes[m].length; });
+
+    nombres.forEach(n => {
+      series[n] = keys.map(m => {
+        const vals = porMes[m].map(k => valorDe(n, k)).filter(v => v !== null);
+        if (!vals.length) return null;
+        return +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+      });
+    });
+
+    if (porMes[mesActual]) {
+      const hoy = new Date();
+      mesParcial = {
+        label: labels[keys.indexOf(mesActual)].replace(' *', ''),
+        dias: porMes[mesActual].length,
+        diasDelMes: new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate()
+      };
+    }
+  }
+
+  const tieneCombo = (series[COMBO_LABEL] || []).some(v => v !== null);
+  const nombresFinales = tieneCombo ? nombres : owners;
+
+  return {
+    labels, series, keys, diasPorBucket, descartadas, mesParcial,
+    owners: nombresFinales,
+    totalDias: diasOrdenados.length
+  };
 }
 
 function setAcrGranularity(g, el) {
@@ -1068,11 +1177,33 @@ function renderAcrOwnerCheckboxes(owners) {
 function renderAcrDaily() {
   if (!snapshot.length) return;
 
-  const { labels, series, owners } = buildAcrSeries(acrGranularity);
+  const info = buildAcrSeries(acrGranularity);
+  const { labels, series, owners } = info;
 
   if (!document.querySelector('#acrd-owners .acrd-chk')) {
     renderAcrOwnerCheckboxes(owners);
   }
+
+  // --- Título y subtítulo: dicen exactamente qué se está viendo ----------
+  const ttl = document.getElementById('acrd-ttl');
+  if (ttl) ttl.textContent = 'Active Contact Rate por ' + (acrGranularity === 'day' ? 'Día' : 'Mes');
+
+  const partes = [];
+  if (acrGranularity === 'day') {
+    partes.push('Un punto por día · ' + info.totalDias + ' días con snapshot');
+  } else {
+    partes.push('Promedio de los rates diarios de cada mes');
+    if (info.mesParcial) {
+      partes.push('* ' + info.mesParcial.label + ' es mes en curso: promedio de ' +
+                  info.mesParcial.dias + ' de ' + info.mesParcial.diasDelMes + ' días');
+    }
+  }
+  partes.push('fuente: Snapshot Diario');
+  if (info.descartadas > 0) {
+    partes.push('⚠️ ' + info.descartadas + ' filas ignoradas por fecha ilegible');
+  }
+  const meta = document.getElementById('acrd-meta');
+  if (meta) meta.textContent = partes.join(' · ');
 
   const datasets = owners
     .filter(owner => {
@@ -1105,7 +1236,17 @@ function renderAcrDaily() {
       scales: { y: { suggestedMin: 0, suggestedMax: 100, ticks: { callback: v => v + '%' } } },
       plugins: {
         legend: { position: 'top' },
-        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } }
+        tooltip: {
+          callbacks: {
+            // En vista de mes el tooltip dice con cuántos días se calculó,
+            // para que nadie compare un mes de 30 días contra uno de 7 sin saberlo.
+            label: c => {
+              const d = info.diasPorBucket[info.keys[c.dataIndex]];
+              const detalle = acrGranularity === 'month' ? ` (${d} ${d === 1 ? 'día' : 'días'})` : '';
+              return `${c.dataset.label}: ${c.parsed.y}%${detalle}`;
+            }
+          }
+        }
       }
     }
   });
