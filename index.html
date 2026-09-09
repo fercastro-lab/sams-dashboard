@@ -624,6 +624,8 @@ function loadData() {
       window._merchantTargets=(json.merchant_targets||[]).map(normalizeRow);
       window._merchantDetail=(json.merchant_detail||[]).map(normalizeRow);
       window._portfolioMaster=(json.portfolio_master||[]).map(normalizeRow);
+      // Valores mensuales que ya calculo y congelo el Apps Script.
+      window._acrMensual=(json.acr_mensual||[]).map(normalizeRow);
       updateAlertBadge();
       if (document.getElementById('tab-alertas').classList.contains('active')) renderAlertas();
       renderMerchants();
@@ -1068,16 +1070,30 @@ function buildAcrSeries(granularity) {
     return (b && b.total > 0) ? (b.yes / b.total * 100) : null;
   }
 
-  // Contact Rate BPO = promedio simple de Delia y Alex ese día
+  // Contact Rate BPO del dia — se suman los Yes y los holdings de Delia y
+  // Alex, y HASTA ENTONCES se divide. Antes se promediaban sus dos
+  // porcentajes, que da otro numero en cuanto sus portafolios sean de
+  // distinto tamano.
+  //
+  // Y si a un dia le falta el snapshot de uno de los dos, el dia se descarta.
+  // Antes el .filter dejaba pasar al que si tenia dato, asi que la "linea
+  // BPO" de ese dia era en realidad un solo agente, sin ningun aviso.
   function rateComboDia(k) {
-    const rates = SAMS_BPO
-      .map(sam => {
-        const real = Object.keys(dias[k] || {}).find(o => norm(o) === norm(sam));
-        return real ? rateDia(k, real) : null;
-      })
-      .filter(v => v !== null);
-    if (!rates.length) return null;
-    return rates.reduce((a, b) => a + b, 0) / rates.length;
+    let yes = 0, total = 0, presentes = 0;
+    SAMS_BPO.forEach(function(sam) {
+      const real = Object.keys(dias[k] || {}).find(o => norm(o) === norm(sam));
+      if (!real) return;
+      const b = dias[k][real];
+      if (!b || b.total === 0) return;
+      yes += b.yes;
+      total += b.total;
+      presentes++;
+    });
+    if (presentes < SAMS_BPO.length) {
+      if (presentes > 0) console.warn('ACR: el dia ' + k + ' no tiene snapshot de los dos agentes del BPO — se excluye');
+      return null;
+    }
+    return yes / total * 100;
   }
 
   function valorDe(nombre, k) {
@@ -1105,42 +1121,97 @@ function buildAcrSeries(granularity) {
     });
 
   } else {
-    // Agrupamos los días por mes
-    const porMes = {};
-    diasOrdenados.forEach(k => {
-      const m = k.slice(0, 7);
-      if (!porMes[m]) porMes[m] = [];
-      porMes[m].push(k);
+    // ======================================================================
+    // VISTA MENSUAL — el dashboard NO calcula el mes, solo lo lee.
+    //
+    // El Apps Script (congelarACRMensual) lo calcula una vez y lo guarda en
+    // la pestana "ACR Mensual". Aqui solo se muestra. Asi el numero de la
+    // grafica y el numero que se reporta son el mismo, siempre — y un mes
+    // cerrado ya no puede cambiar porque cambio la data o la formula.
+    //
+    // Se usa `var` a proposito: en JavaScript `var` es visible en toda la
+    // funcion, asi que estas variables llegan al `return` de abajo aunque se
+    // declaren dentro de este `else`.
+    // ======================================================================
+    var congeladosUsados = {};   // meses que se leyeron con candado
+    var sinPestana = false;      // true si la pestana todavia no existe
+
+    // El Apps Script etiqueta el scope del BPO como "BPO (Delia + Alex)" y
+    // aqui la serie se llama "Contact Rate BPO (Delia + Alex)". Esta funcion
+    // traduce entre las dos. Si cambias una etiqueta, cambia la otra o el mes
+    // deja de aparecer en la grafica.
+    var scopeKey = function(nombre) {
+      return norm(nombre === COMBO_LABEL ? 'BPO (Delia + Alex)' : nombre);
+    };
+
+    const MESES_TXT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const etiqueta = function(m) {
+      return MESES_TXT[parseInt(m.slice(5, 7), 10) - 1] + ' ' + m.slice(0, 4);
+    };
+
+    const acrFilas = window._acrMensual || [];
+    const idx = {};   // "2026-08|bpo (delia + alex)" -> fila de la pestana
+    acrFilas.forEach(function(r) {
+      if (!r.mes || !r.scope) return;
+      idx[String(r.mes).trim() + '|' + norm(r.scope)] = r;
     });
 
-    keys = Object.keys(porMes).sort();
-    const mesActual = keyMes(new Date());
+    keys = [...new Set(acrFilas.map(function(r) { return String(r.mes).trim(); }).filter(Boolean))].sort();
 
-    labels = keys.map(m => {
-      const d = diasFecha[porMes[m][0]];
-      const txt = d.toLocaleDateString('es-MX', { month: 'short', year: 'numeric' });
-      // El mes en curso se marca con * y se explica en el subtítulo, en vez
-      // de esconderse: un promedio parcial es información, no un error.
-      return m === mesActual ? txt + ' *' : txt;
-    });
-
-    keys.forEach(m => { diasPorBucket[m] = porMes[m].length; });
-
-    nombres.forEach(n => {
-      series[n] = keys.map(m => {
-        const vals = porMes[m].map(k => valorDe(n, k)).filter(v => v !== null);
-        if (!vals.length) return null;
-        return +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+    if (!keys.length) {
+      // La pestana todavia no existe (no has corrido congelarACRMensual).
+      // Calculamos desde el snapshot para no dejar la grafica vacia, pero lo
+      // avisamos en el subtitulo en vez de disimularlo.
+      sinPestana = true;
+      const porMes = {};
+      diasOrdenados.forEach(function(k) {
+        const m = k.slice(0, 7);
+        if (!porMes[m]) porMes[m] = [];
+        porMes[m].push(k);
       });
-    });
+      keys = Object.keys(porMes).sort();
+      labels = keys.map(etiqueta);
+      keys.forEach(function(m) { diasPorBucket[m] = porMes[m].length; });
+      nombres.forEach(function(n) {
+        series[n] = keys.map(function(m) {
+          const vals = porMes[m].map(function(k) { return valorDe(n, k); })
+                                .filter(function(v) { return v !== null; });
+          if (!vals.length) return null;
+          return +(vals.reduce(function(a, b) { return a + b; }, 0) / vals.length).toFixed(1);
+        });
+      });
 
-    if (porMes[mesActual]) {
-      const hoy = new Date();
-      mesParcial = {
-        label: labels[keys.indexOf(mesActual)].replace(' *', ''),
-        dias: porMes[mesActual].length,
-        diasDelMes: new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate()
-      };
+    } else {
+      // Dias y candado los tomamos de la fila del BPO de cada mes.
+      keys.forEach(function(m) {
+        const r = idx[m + '|' + scopeKey(COMBO_LABEL)];
+        diasPorBucket[m] = r ? (parseInt(r.dias_con_dato, 10) || 0) : 0;
+        if (r && String(r.congelado).trim() === 'Sí') congeladosUsados[m] = true;
+      });
+
+      // El mes sin candado se marca con * : es el mes en curso y sigue vivo.
+      labels = keys.map(function(m) {
+        return congeladosUsados[m] ? etiqueta(m) : etiqueta(m) + ' *';
+      });
+
+      nombres.forEach(function(n) {
+        series[n] = keys.map(function(m) {
+          const r = idx[m + '|' + scopeKey(n)];
+          if (!r) return null;
+          const v = parseFloat(r.acr_promedio);   // llega como fraccion: 0.401
+          return isNaN(v) ? null : +(v * 100).toFixed(1);
+        });
+      });
+
+      const vivo = keys.filter(function(m) { return !congeladosUsados[m]; }).pop();
+      if (vivo) {
+        const r = idx[vivo + '|' + scopeKey(COMBO_LABEL)];
+        mesParcial = {
+          label: etiqueta(vivo),
+          dias: r ? (parseInt(r.dias_con_dato, 10) || 0) : 0,
+          diasDelMes: r ? (parseInt(r.dias_del_mes, 10) || 0) : 0
+        };
+      }
     }
   }
 
@@ -1149,6 +1220,8 @@ function buildAcrSeries(granularity) {
 
   return {
     labels, series, keys, diasPorBucket, descartadas, mesParcial,
+    congeladosUsados: (typeof congeladosUsados !== 'undefined' ? congeladosUsados : {}),
+    sinPestana: (typeof sinPestana !== 'undefined' ? !!sinPestana : false),
     owners: nombresFinales,
     totalDias: diasOrdenados.length
   };
@@ -1192,9 +1265,15 @@ function renderAcrDaily() {
   if (acrGranularity === 'day') {
     partes.push('Un punto por día · ' + info.totalDias + ' días con snapshot');
   } else {
-    partes.push('Promedio de los rates diarios de cada mes');
+    if (info.sinPestana) {
+      partes.push('⚠️ Calculado en vivo desde el snapshot — corre congelarACRMensual() en Apps Script');
+    } else {
+      const nCong = Object.keys(info.congeladosUsados || {}).length;
+      partes.push('Valores guardados en la pestaña ACR Mensual' +
+                  (nCong ? ' · 🔒 ' + nCong + (nCong === 1 ? ' mes cerrado' : ' meses cerrados') : ''));
+    }
     if (info.mesParcial) {
-      partes.push('* ' + info.mesParcial.label + ' es mes en curso: promedio de ' +
+      partes.push('* ' + info.mesParcial.label + ' es mes en curso: ' +
                   info.mesParcial.dias + ' de ' + info.mesParcial.diasDelMes + ' días');
     }
   }
@@ -1241,9 +1320,11 @@ function renderAcrDaily() {
             // En vista de mes el tooltip dice con cuántos días se calculó,
             // para que nadie compare un mes de 30 días contra uno de 7 sin saberlo.
             label: c => {
-              const d = info.diasPorBucket[info.keys[c.dataIndex]];
-              const detalle = acrGranularity === 'month' ? ` (${d} ${d === 1 ? 'día' : 'días'})` : '';
-              return `${c.dataset.label}: ${c.parsed.y}%${detalle}`;
+              if (acrGranularity !== 'month') return `${c.dataset.label}: ${c.parsed.y}%`;
+              const k = info.keys[c.dataIndex];
+              const d = info.diasPorBucket[k];
+              const lock = (info.congeladosUsados || {})[k] ? ' 🔒' : '';
+              return `${c.dataset.label}: ${c.parsed.y}% (${d} ${d === 1 ? 'día' : 'días'})${lock}`;
             }
           }
         }
