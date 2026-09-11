@@ -203,6 +203,7 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
   <button class="tab-nav-btn" onclick="switchTab('performance',this)"><i class="bi bi-graph-up"></i> Master Performance</button>
   <button class="tab-nav-btn" onclick="switchTab('targets',this)"><i class="bi bi-bullseye"></i> Target Performance</button>
   <button class="tab-nav-btn" onclick="switchTab('detail',this)"><i class="bi bi-list-columns-reverse"></i> Merchant Detail</button>
+  <button class="tab-nav-btn" onclick="switchTab('trayectoria',this)"><i class="bi bi-graph-up-arrow"></i> Trayectoria</button>
   <button class="tab-nav-btn" onclick="switchTab('alertas',this)"><i class="bi bi-exclamation-triangle"></i> Alertas <span class="tab-badge" id="alert-count" style="display:none">0</span></button>
 </div>
 
@@ -535,6 +536,73 @@ td{padding:11px 14px;font-size:13px;color:var(--text2);vertical-align:middle;whi
 </div>
 </div>
 
+<!-- TRAYECTORIA TAB -->
+<div id="tab-trayectoria" class="tab-content">
+<div class="main">
+
+  <div class="alert-note">
+    <i class="bi bi-info-circle-fill"></i>
+    <div><b>Active Contact = Yes significa que el merchant respondió, no que se le contactó.</b>
+    El agente contacta a todos, así que no hay grupo "sin contactar" con el cual comparar.
+    Lo único que estos datos pueden distinguir es el <b>orden en el tiempo</b>: si el GMV se movió
+    antes o después del día en que el holding cambió de estado. La causa va antes del efecto.</div>
+  </div>
+
+  <div class="filters" style="margin-bottom:20px">
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-arrow-left-right"></i> Evento</span>
+      <select class="fsel" id="tray-tipo" onchange="renderTrayectoria()">
+        <option value="ambos">Los dos</option>
+        <option value="Empezó a responder">Empezó a responder</option>
+        <option value="Dejó de responder">Dejó de responder</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-person"></i> Agente</span>
+      <select class="fsel" id="tray-owner" onchange="renderTrayectoria()">
+        <option value="all">Todos</option>
+      </select>
+    </div>
+    <div class="divider-v"></div>
+    <div class="filter-group">
+      <span class="filter-label"><i class="bi bi-graph-up"></i> Medida</span>
+      <select class="fsel" id="tray-medida" onchange="renderTrayectoria()">
+        <option value="mediana">Mediana (recomendado)</option>
+        <option value="promedio">Promedio</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="stats" style="margin-bottom:20px" id="tray-stats"></div>
+
+  <div class="table-card" style="padding:20px;margin-bottom:20px">
+    <div class="table-top" style="border-bottom:none;padding:0 0 12px 0">
+      <div>
+        <div class="table-ttl">GMV semanal alrededor del cambio de estado</div>
+        <div class="table-meta" id="tray-meta">Cada evento se divide entre su propio GMV de las semanas −8 a −5, para poder promediar holdings de tamaños distintos en la misma línea</div>
+      </div>
+    </div>
+    <div style="position:relative;height:360px">
+      <canvas id="tray-canvas"></canvas>
+    </div>
+  </div>
+
+  <div id="tray-lectura"></div>
+
+  <div class="perf-section">
+    <div class="perf-header">
+      <div>
+        <div class="perf-title">Eventos detectados</div>
+        <div class="perf-sub" id="tray-sub">Un renglón por cambio de estado · índice 1.00 = su propia base</div>
+      </div>
+    </div>
+    <div id="tray-container"><div class="loading-box"><div class="spinner"></div><div class="loading-lbl">Cargando trayectoria...</div></div></div>
+  </div>
+
+</div>
+</div>
+
 <div id="tab-alertas" class="tab-content">
 <div class="main">
 
@@ -626,6 +694,8 @@ function loadData() {
       window._portfolioMaster=(json.portfolio_master||[]).map(normalizeRow);
       // Valores mensuales que ya calculo y congelo el Apps Script.
       window._acrMensual=(json.acr_mensual||[]).map(normalizeRow);
+      window._trayCurva=(json.trayectoria||[]).map(normalizeRow);
+      window._trayEventos=(json.trayectoria_eventos||[]).map(normalizeRow);
       updateAlertBadge();
       if (document.getElementById('tab-alertas').classList.contains('active')) renderAlertas();
       renderMerchants();
@@ -633,6 +703,7 @@ function loadData() {
       applyFilters();
       renderCalendar();
       if (document.getElementById('tab-acr-daily').classList.contains('active')) renderAcrDaily();
+      if (document.getElementById('tab-trayectoria').classList.contains('active')) renderTrayectoria();
       const now=new Date();
       document.getElementById("nav-update").textContent="Actualizado "+now.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
       toast("Datos actualizados",false);
@@ -956,6 +1027,7 @@ function switchTab(tab, el) {
   if (tab === 'detail') renderMerchantDetail();
   if (tab === 'acr-daily') renderAcrDaily();
   if (tab === 'alertas') renderAlertas();
+  if (tab === 'trayectoria') renderTrayectoria();
 }
 
 // ============================================
@@ -1931,6 +2003,255 @@ function detSort(col) {
     detSortDir = -1; // al cambiar de columna, arrancamos mayor a menor
   }
   renderMerchantDetail();
+}
+
+// ============================================
+// TRAYECTORIA — ¿el GMV se movió antes o después de que respondieron?
+//
+// La curva se calcula AQUÍ, desde "Trayectoria Eventos", no desde el tab
+// "Trayectoria". Así los filtros de agente y de tipo de evento funcionan sin
+// tener que volver a correr el Apps Script.
+//
+// Cada evento ya viene indexado a su propia base (columnas s-8 … s+7, donde
+// 1.00 = su GMV semanal promedio de las semanas −8 a −5). Por eso se pueden
+// promediar holdings de tamaños muy distintos en la misma línea.
+//
+// Se usa MEDIANA por default: el GMV de holdings está muy sesgado (Editorial
+// Panini hace 100x lo de una zapatería), y un solo outlier mueve el promedio
+// de toda la curva.
+// ============================================
+let trayChart = null;
+const TRAY_SEMANAS = 8;
+const TRAY_COLORS = { 'Empezó a responder': '#5AAD12', 'Dejó de responder': '#D41413' };
+
+function trayCols() {
+  const c = [];
+  for (let k = -TRAY_SEMANAS; k < TRAY_SEMANAS; k++) c.push('s' + (k >= 0 ? '+' + k : k));
+  return c;
+}
+
+function trayMed(v) {
+  if (!v.length) return null;
+  const a = v.slice().sort(function(x, y) { return x - y; });
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+function trayPro(v) {
+  if (!v.length) return null;
+  return v.reduce(function(a, b) { return a + b; }, 0) / v.length;
+}
+
+function renderTrayectoria() {
+  const data = window._trayEventos || [];
+  const cont = document.getElementById('tray-container');
+
+  if (!data.length) {
+    cont.innerHTML = '<div class="empty-box"><div class="empty-icon"><i class="bi bi-hourglass"></i></div>' +
+      '<div class="empty-lbl">Sin datos de trayectoria. Corre <b>probarTrayectoria()</b> en Apps Script ' +
+      'para ver si hay suficientes eventos, y luego <b>syncTrayectoria()</b>.</div></div>';
+    document.getElementById('tray-stats').innerHTML = '';
+    document.getElementById('tray-lectura').innerHTML = '';
+    if (trayChart) { trayChart.destroy(); trayChart = null; }
+    return;
+  }
+
+  // --- llenar el filtro de agentes una sola vez ---
+  const owners = [...new Set(data.map(function(r) { return r.owner; }).filter(Boolean))].sort();
+  const so = document.getElementById('tray-owner');
+  if (so.options.length <= 1) {
+    owners.forEach(function(o) {
+      const op = document.createElement('option');
+      op.value = o; op.textContent = o;
+      so.appendChild(op);
+    });
+  }
+
+  const tipoF = document.getElementById('tray-tipo').value;
+  const ownerF = document.getElementById('tray-owner').value;
+  const medida = document.getElementById('tray-medida').value;
+  const agg = medida === 'mediana' ? trayMed : trayPro;
+
+  const filtrados = data.filter(function(r) {
+    if (ownerF !== 'all' && r.owner !== ownerF) return false;
+    return true;
+  });
+
+  const tipos = tipoF === 'ambos'
+    ? ['Empezó a responder', 'Dejó de responder']
+    : [tipoF];
+
+  const cols = trayCols();
+  const labels = cols.map(function(c) { return 'sem ' + c.replace('s', ''); });
+
+  // --- una serie por tipo de evento ---
+  const datasets = [], resumen = [];
+  tipos.forEach(function(tipo) {
+    const g = filtrados.filter(function(r) { return r.tipo === tipo; });
+    if (!g.length) return;
+
+    const serie = cols.map(function(c) {
+      const vals = g.map(function(r) { return parseFloat(r[c]); }).filter(function(v) { return !isNaN(v); });
+      const v = agg(vals);
+      return v === null ? null : +v.toFixed(3);
+    });
+
+    datasets.push({
+      label: tipo + ' (' + g.length + ')',
+      data: serie,
+      borderColor: TRAY_COLORS[tipo] || '#8FA0AC',
+      backgroundColor: TRAY_COLORS[tipo] || '#8FA0AC',
+      borderWidth: 3, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, spanGaps: true
+    });
+
+    // antes = semanas -3..-1 · despues = semanas +1..+3
+    const iA = [cols.indexOf('s-3'), cols.indexOf('s-2'), cols.indexOf('s-1')];
+    const iD = [cols.indexOf('s+1'), cols.indexOf('s+2'), cols.indexOf('s+3')];
+    const antes = trayPro(iA.map(function(i) { return serie[i]; }).filter(function(v) { return v !== null; }));
+    const desp  = trayPro(iD.map(function(i) { return serie[i]; }).filter(function(v) { return v !== null; }));
+    resumen.push({ tipo: tipo, n: g.length, antes: antes, despues: desp });
+  });
+
+  // --- línea vertical en la semana 0, dibujada como un dataset aparte ---
+  const iCero = cols.indexOf('s+0');
+  if (iCero !== -1 && datasets.length) {
+    const todos = datasets.reduce(function(a, d) { return a.concat(d.data.filter(function(v) { return v !== null; })); }, []);
+    const max = Math.max.apply(null, todos.concat([1.4]));
+    datasets.push({
+      label: 'El cambio',
+      data: cols.map(function(c, i) { return i === iCero ? max * 1.05 : null; }),
+      borderColor: '#214345', borderWidth: 2, borderDash: [4, 4],
+      pointRadius: 0, showLine: false, fill: false,
+      // una barra vertical falsa: un solo punto alto en la semana 0
+      type: 'bar', backgroundColor: 'rgba(33,67,69,.10)', barPercentage: 0.35, order: 99
+    });
+  }
+
+  // --- stat cards ---
+  const nEmp = filtrados.filter(function(r) { return r.tipo === 'Empezó a responder'; }).length;
+  const nDej = filtrados.filter(function(r) { return r.tipo === 'Dejó de responder'; }).length;
+  document.getElementById('tray-stats').innerHTML = [
+    { label: 'Empezaron a responder', val: nEmp, color: 'var(--green-d)', sub: 'eventos con ventana completa' },
+    { label: 'Dejaron de responder', val: nDej, color: 'var(--red-d)', sub: 'eventos con ventana completa' },
+    { label: 'Holdings distintos', val: [...new Set(filtrados.map(function(r) { return r.holding_id_bq; }))].length, color: 'var(--text1)', sub: 'algunos cambiaron más de una vez' },
+    { label: 'Ventana', val: '±8 sem', color: 'var(--teal)', sub: 'base: semanas −8 a −5' }
+  ].map(function(s) {
+    return '<div class="stat"><div class="stat-over">' + s.label + '</div>' +
+      '<div class="stat-val" style="color:' + s.color + ';font-size:30px">' + s.val + '</div>' +
+      '<div class="stat-foot">' + s.sub + '</div></div>';
+  }).join('');
+
+  // --- la lectura: quién se movió primero ---
+  document.getElementById('tray-lectura').innerHTML = resumen.map(function(r) {
+    if (r.antes === null || r.despues === null) return '';
+    const movPrevio = Math.abs(r.antes - 1);
+    const movPost = Math.abs(r.despues - r.antes);
+    let titulo, texto, cls;
+
+    if (r.n < 10) {
+      cls = 'flag-gray';
+      titulo = r.tipo + ': solo ' + r.n + ' eventos';
+      texto = 'Menos de 10 eventos es ruido, no curva. Espera a que el snapshot acumule más días seguidos.';
+    } else if (movPrevio > 0.10) {
+      // El pre-trend manda: si ya venía moviéndose antes, no se puede saber
+      // cuánto del salto posterior es continuación de lo que ya pasaba.
+      cls = 'flag-yellow';
+      titulo = r.tipo + ': el GMV ya venía moviéndose ANTES';
+      texto = (r.tipo === 'Empezó a responder'
+        ? 'El negocio se recuperó primero, y por eso el merchant empezó a contestar. Responder es síntoma, no causa: no le cuelgues el crecimiento al contacto.'
+        : 'El negocio ya venía cayendo antes de que dejaran de contestar. Dejar de responder es la consecuencia, no el aviso.')
+        + ' (3 sem antes ' + r.antes.toFixed(2) + ' · 3 sem después ' + r.despues.toFixed(2) + ')';
+    } else if (movPost > 0.10) {
+      cls = 'flag-ok';
+      titulo = r.tipo + ': la curva estaba plana y se movió DESPUÉS';
+      texto = (r.tipo === 'Empezó a responder'
+        ? 'Consistente con que retomar la relación sí ayude al GMV. No lo prueba (nadie asignó esto al azar), pero es la señal más fuerte que dan estos datos.'
+        : 'El GMV cae después de que dejan de contestar. Eso hace de la falta de respuesta una señal temprana de churn: algo sobre lo que los SAMs sí pueden actuar antes de perder el GMV.')
+        + ' (3 sem antes ' + r.antes.toFixed(2) + ' · 3 sem después ' + r.despues.toFixed(2) + ')';
+    } else {
+      cls = 'flag-gray';
+      titulo = r.tipo + ': sin movimiento claro';
+      texto = 'La curva no se mueve ni antes ni después de forma distinguible del ruido. (3 sem antes '
+        + r.antes.toFixed(2) + ' · 3 sem después ' + r.despues.toFixed(2) + ')';
+    }
+
+    return '<div class="table-card" style="padding:16px 20px;margin-bottom:12px">' +
+      '<div style="display:flex;align-items:flex-start;gap:10px">' +
+      '<span class="flag ' + cls + '" style="flex-shrink:0;margin-top:2px">LECTURA</span>' +
+      '<div><div style="font-size:14px;font-weight:800;color:var(--text1);margin-bottom:4px">' + titulo + '</div>' +
+      '<div style="font-size:12px;color:var(--text2);line-height:1.6">' + texto + '</div></div></div></div>';
+  }).join('');
+
+  // --- el gráfico ---
+  const ctx = document.getElementById('tray-canvas').getContext('2d');
+  if (trayChart) trayChart.destroy();
+  trayChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        y: { title: { display: true, text: 'GMV vs su propia base (1.00 = base)' },
+             ticks: { callback: function(v) { return v.toFixed(2) + 'x'; } } },
+        x: { title: { display: true, text: 'Semanas antes / después del cambio de estado' } }
+      },
+      plugins: {
+        legend: { position: 'top', labels: { filter: function(i) { return i.text !== 'El cambio'; } } },
+        tooltip: {
+          callbacks: {
+            label: function(c) {
+              if (c.dataset.label === 'El cambio') return null;
+              return c.dataset.label + ': ' + c.parsed.y.toFixed(2) + 'x su base';
+            }
+          }
+        }
+      }
+    }
+  });
+
+  // --- tabla de eventos ---
+  const iA = [cols.indexOf('s-3'), cols.indexOf('s-2'), cols.indexOf('s-1')];
+  const iD = [cols.indexOf('s+1'), cols.indexOf('s+2'), cols.indexOf('s+3')];
+  const fmtM = function(v) {
+    const n = parseFloat(v) || 0;
+    if (n === 0) return '<span class="empty-cell">—</span>';
+    return '$' + (Math.abs(n) >= 1000000 ? (Math.abs(n) / 1000000).toFixed(1) + 'M'
+         : Math.abs(n) >= 1000 ? (Math.abs(n) / 1000).toFixed(0) + 'K' : Math.abs(n).toFixed(0));
+  };
+
+  const filas = filtrados.filter(function(r) { return tipos.indexOf(r.tipo) !== -1; })
+    .sort(function(a, b) { return a.fecha_cambio < b.fecha_cambio ? 1 : -1; })
+    .slice(0, 200)
+    .map(function(r) {
+      const a = trayPro(iA.map(function(i) { return parseFloat(r[cols[i]]); }).filter(function(v) { return !isNaN(v); }));
+      const d = trayPro(iD.map(function(i) { return parseFloat(r[cols[i]]); }).filter(function(v) { return !isNaN(v); }));
+      const delta = (a !== null && d !== null) ? d - a : null;
+      const dCls = delta === null ? '' : (delta > 0.05 ? 'pct-green' : delta < -0.05 ? 'pct-red' : '');
+      const tipoBadge = r.tipo === 'Empezó a responder'
+        ? '<span class="badge-yes" style="font-size:10px;padding:2px 7px">Empezó</span>'
+        : '<span class="badge-no" style="font-size:10px;padding:2px 7px">Dejó</span>';
+      const owner = (r.owner || '').replace('Martinez', 'M.').replace('Martínez', 'M.').replace('Tellez', 'T.').replace('Saldivar', 'S.');
+      return '<tr>' +
+        '<td style="position:sticky;left:0;background:var(--card);font-weight:700;font-size:12px;max-width:170px;overflow:hidden;text-overflow:ellipsis" title="' + (r.nombre || '') + '">' + (r.nombre || '') + '</td>' +
+        '<td>' + tipoBadge + '</td>' +
+        '<td style="font-size:11px">' + (r.fecha_cambio || '') + '</td>' +
+        '<td><span class="badge-owner" style="font-size:10px;padding:2px 7px">' + owner + '</span></td>' +
+        '<td>' + fmtM(r.gmv_base_semanal) + '</td>' +
+        '<td>' + (a === null ? '—' : a.toFixed(2) + 'x') + '</td>' +
+        '<td>' + (d === null ? '—' : d.toFixed(2) + 'x') + '</td>' +
+        '<td><span class="' + dCls + '">' + (delta === null ? '—' : (delta > 0 ? '+' : '') + delta.toFixed(2)) + '</span></td>' +
+        '<td style="font-size:11px;color:var(--text3)">' + (r.hueco_dias || '') + 'd</td>' +
+        '</tr>';
+    }).join('');
+
+  cont.innerHTML = '<div class="perf-table-wrap"><table class="perf-table"><thead><tr>' +
+    '<th style="text-align:left;position:sticky;left:0;min-width:170px;z-index:2">Holding</th>' +
+    '<th>Evento</th><th>Fecha</th><th>Agente</th><th>GMV base/sem</th>' +
+    '<th>3 sem antes</th><th>3 sem después</th><th>Cambio</th><th>Hueco</th>' +
+    '</tr></thead><tbody>' + filas + '</tbody></table></div>';
+
+  document.getElementById('tray-sub').textContent =
+    filtrados.filter(function(r) { return tipos.indexOf(r.tipo) !== -1; }).length +
+    ' eventos · "hueco" son los días sin dato justo antes del cambio: entre más chico, más certeza de la fecha';
 }
 
 // ============================================
